@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,8 +19,9 @@ import {
   TrendingUp,
   Pause,
   Repeat,
+  Volume2,
 } from "lucide-react";
-import { getClip, saveSession } from "@/lib/clipStore";
+import { getClip, saveSession, getSessionsForClip } from "@/lib/clipStore";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { useSpeechAnalysis, type AnalysisResult } from "@/hooks/useSpeechAnalysis";
 
@@ -41,6 +42,14 @@ const Retell = () => {
   const { isRecording, audioUrl, duration, error, start, stop } = useAudioRecorder();
   const { startListening, stopAndAnalyze, error: speechError } = useSpeechAnalysis();
 
+  // Get latest shadow session for comparison
+  const latestShadow = useMemo(() => {
+    if (!clip) return null;
+    const shadowSessions = getSessionsForClip(clip.id).filter((s) => s.type === "shadow");
+    return shadowSessions.length > 0
+      ? shadowSessions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]
+      : null;
+  }, [clip]);
   const handleStart = useCallback(async () => {
     setPhase("recording");
     setRemaining(timeLimit * 60);
@@ -208,6 +217,40 @@ const Retell = () => {
     );
   }
 
+
+  // Metric card helper
+  const MetricCard = ({
+    icon,
+    label,
+    value,
+    unit,
+    shadowValue,
+    shadowUnit,
+  }: {
+    icon: React.ReactNode;
+    label: string;
+    value: string | number;
+    unit?: string;
+    shadowValue?: string | number | null;
+    shadowUnit?: string;
+  }) => (
+    <Card>
+      <CardContent className="flex items-center gap-3 p-4">
+        <div className="shrink-0">{icon}</div>
+        <div className="flex-1">
+          <p className="text-2xl font-bold text-foreground">
+            {value}
+            {unit && <span className="ml-1 text-sm font-normal text-muted-foreground">{unit}</span>}
+          </p>
+          <p className="text-sm text-muted-foreground">{label}</p>
+          <p className="text-xs text-muted-foreground/70 mt-0.5">
+            Shadow: {shadowValue != null ? `${shadowValue}${shadowUnit ? ` ${shadowUnit}` : ""}` : "—"}
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
   // Results phase
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 space-y-6">
@@ -227,156 +270,164 @@ const Retell = () => {
         </Card>
       )}
 
-      {/* Metrics */}
       {analysisResult && (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Card>
-            <CardContent className="flex items-center gap-3 p-4">
-              <Gauge className="h-8 w-8 text-primary shrink-0" />
-              <div>
-                <p className="text-2xl font-bold text-foreground">{analysisResult.wordsPerMinute}</p>
-                <p className="text-sm text-muted-foreground">Words per minute</p>
-              </div>
+        <>
+          {/* Section 1: Voice Features */}
+          <div className="space-y-3">
+            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+              <Volume2 className="h-5 w-5 text-primary" /> Voice Features
+            </h2>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <MetricCard
+                icon={<Gauge className="h-8 w-8 text-primary" />}
+                label="Words per minute"
+                value={analysisResult.wordsPerMinute}
+                unit="WPM"
+                shadowValue={latestShadow?.wordsPerMinute}
+                shadowUnit="WPM"
+              />
+              <MetricCard
+                icon={<Gauge className="h-8 w-8 text-muted-foreground/40" />}
+                label="Pitch"
+                value="—"
+                unit=""
+                shadowValue="Coming soon"
+              />
+            </div>
+          </div>
+
+          {/* Section 2: Speech Fluency */}
+          <div className="space-y-3">
+            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+              <MessageCircle className="h-5 w-5 text-primary" /> Speech Fluency
+            </h2>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <MetricCard
+                icon={<MessageCircle className="h-8 w-8 text-destructive" />}
+                label="Filler words"
+                value={analysisResult.fillerWordCount}
+                shadowValue={latestShadow?.fillerWordCount}
+              />
+              <MetricCard
+                icon={<Repeat className="h-8 w-8 text-primary" />}
+                label="Elongations"
+                value={analysisResult.elongationCount}
+                shadowValue={latestShadow?.elongationCount}
+              />
+            </div>
+
+            {/* Filler word breakdown */}
+            {Object.keys(analysisResult.fillerDetails).length > 0 && (
+              <Card>
+                <CardContent className="p-4 flex flex-wrap gap-2">
+                  {Object.entries(analysisResult.fillerDetails).map(([word, count]) => (
+                    <Badge key={word} variant="secondary">
+                      "{word}" × {count}
+                    </Badge>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Elongation breakdown */}
+            {Object.keys(analysisResult.elongationDetails).length > 0 && (
+              <Card>
+                <CardContent className="p-4 flex flex-wrap gap-2">
+                  {Object.entries(analysisResult.elongationDetails).map(([word, count]) => (
+                    <Badge key={word} variant="secondary">
+                      "{word}" × {count}
+                    </Badge>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Section 3: Content Strength */}
+          <div className="space-y-3">
+            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+              <Brain className="h-5 w-5 text-primary" /> Content Strength
+            </h2>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <MetricCard
+                icon={<Brain className="h-8 w-8 text-primary" />}
+                label="Vocabulary richness"
+                value={`${Math.round(analysisResult.vocabularyRichness * 100)}%`}
+                shadowValue={latestShadow ? `${Math.round(latestShadow.vocabularyRichness * 100)}%` : null}
+              />
+              <MetricCard
+                icon={<BookOpen className="h-8 w-8 text-primary" />}
+                label="Total words spoken"
+                value={analysisResult.totalWords}
+                shadowValue={latestShadow?.totalWords}
+              />
+            </div>
+          </div>
+
+          {/* Room for Improvement */}
+          <Card className="border-primary/20">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <TrendingUp className="h-5 w-5 text-primary" /> Room for Improvement
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {analysisResult.wordsPerMinute > 0 && analysisResult.wordsPerMinute < 120 && (
+                <div className="flex items-start gap-2 text-sm">
+                  <Gauge className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                  <p className="text-muted-foreground">Your pace ({analysisResult.wordsPerMinute} WPM) is a bit slow. Aim for 120–160 WPM for natural conversation.</p>
+                </div>
+              )}
+              {analysisResult.wordsPerMinute > 160 && (
+                <div className="flex items-start gap-2 text-sm">
+                  <Gauge className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                  <p className="text-muted-foreground">Your pace ({analysisResult.wordsPerMinute} WPM) is quite fast. Try slowing down for clarity.</p>
+                </div>
+              )}
+              {analysisResult.wordsPerMinute >= 120 && analysisResult.wordsPerMinute <= 160 && (
+                <div className="flex items-start gap-2 text-sm">
+                  <Gauge className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+                  <p className="text-muted-foreground">Great pace! {analysisResult.wordsPerMinute} WPM is in the natural conversation range.</p>
+                </div>
+              )}
+              {analysisResult.fillerWordCount > 5 && (
+                <div className="flex items-start gap-2 text-sm">
+                  <MessageCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                  <p className="text-muted-foreground">Try to reduce filler words — you used {analysisResult.fillerWordCount}. Target: as few as possible.</p>
+                </div>
+              )}
+              {analysisResult.pauseRatio > 0.3 && (
+                <div className="flex items-start gap-2 text-sm">
+                  <Pause className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                  <p className="text-muted-foreground">You paused for {Math.round(analysisResult.pauseRatio * 100)}% of the time. Try to keep your flow steady.</p>
+                </div>
+              )}
+              {analysisResult.elongationCount > 0 && (
+                <div className="flex items-start gap-2 text-sm">
+                  <Repeat className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                  <p className="text-muted-foreground">You elongated {analysisResult.elongationCount} word(s). Keep words crisp for clarity.</p>
+                </div>
+              )}
+              {analysisResult.fillerWordCount <= 5 && analysisResult.pauseRatio <= 0.3 && analysisResult.elongationCount === 0 && (
+                <p className="text-sm text-primary font-medium">Looking good! Keep practicing to maintain this quality.</p>
+              )}
             </CardContent>
           </Card>
 
-          <Card>
-            <CardContent className="flex items-center gap-3 p-4">
-              <MessageCircle className="h-8 w-8 text-destructive shrink-0" />
-              <div>
-                <p className="text-2xl font-bold text-foreground">
-                  {analysisResult.fillerWordCount}{" "}
-                  <span className="text-sm font-normal text-muted-foreground">
-                    ({analysisResult.fillerWordsPerMinute}/min)
-                  </span>
+          {/* Transcript */}
+          {analysisResult.transcript && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Transcript</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  {analysisResult.transcript}
                 </p>
-                <p className="text-sm text-muted-foreground">Filler words</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="flex items-center gap-3 p-4">
-              <Brain className="h-8 w-8 text-primary shrink-0" />
-              <div>
-                <p className="text-2xl font-bold text-foreground">
-                  {Math.round(analysisResult.vocabularyRichness * 100)}%
-                </p>
-                <p className="text-sm text-muted-foreground">Vocabulary richness</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="flex items-center gap-3 p-4">
-              <BookOpen className="h-8 w-8 text-primary shrink-0" />
-              <div>
-                <p className="text-2xl font-bold text-foreground">{analysisResult.totalWords}</p>
-                <p className="text-sm text-muted-foreground">Total words spoken</p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Filler word breakdown */}
-      {analysisResult && Object.keys(analysisResult.fillerDetails).length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Filler Word Breakdown</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            {Object.entries(analysisResult.fillerDetails).map(([word, count]) => (
-              <Badge key={word} variant="secondary">
-                "{word}" × {count}
-              </Badge>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Elongation breakdown */}
-      {analysisResult && Object.keys(analysisResult.elongationDetails).length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Repeat className="h-5 w-5 text-primary" /> Elongations Detected
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            {Object.entries(analysisResult.elongationDetails).map(([word, count]) => (
-              <Badge key={word} variant="secondary">
-                "{word}" × {count}
-              </Badge>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Room for Improvement */}
-      {analysisResult && (
-        <Card className="border-primary/20">
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <TrendingUp className="h-5 w-5 text-primary" /> Room for Improvement
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {analysisResult.wordsPerMinute > 0 && analysisResult.wordsPerMinute < 120 && (
-              <div className="flex items-start gap-2 text-sm">
-                <Gauge className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                <p className="text-muted-foreground">Your pace ({analysisResult.wordsPerMinute} WPM) is a bit slow. Aim for 120–160 WPM for natural conversation.</p>
-              </div>
-            )}
-            {analysisResult.wordsPerMinute > 160 && (
-              <div className="flex items-start gap-2 text-sm">
-                <Gauge className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                <p className="text-muted-foreground">Your pace ({analysisResult.wordsPerMinute} WPM) is quite fast. Try slowing down for clarity.</p>
-              </div>
-            )}
-            {analysisResult.wordsPerMinute >= 120 && analysisResult.wordsPerMinute <= 160 && (
-              <div className="flex items-start gap-2 text-sm">
-                <Gauge className="h-4 w-4 text-primary mt-0.5 shrink-0" />
-                <p className="text-muted-foreground">Great pace! {analysisResult.wordsPerMinute} WPM is in the natural conversation range.</p>
-              </div>
-            )}
-            {analysisResult.fillerWordCount > 5 && (
-              <div className="flex items-start gap-2 text-sm">
-                <MessageCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-                <p className="text-muted-foreground">Try to reduce filler words — you used {analysisResult.fillerWordCount}. Target: as few as possible.</p>
-              </div>
-            )}
-            {analysisResult.pauseRatio > 0.3 && (
-              <div className="flex items-start gap-2 text-sm">
-                <Pause className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                <p className="text-muted-foreground">You paused for {Math.round(analysisResult.pauseRatio * 100)}% of the time. Try to keep your flow steady.</p>
-              </div>
-            )}
-            {analysisResult.elongationCount > 0 && (
-              <div className="flex items-start gap-2 text-sm">
-                <Repeat className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                <p className="text-muted-foreground">You elongated {analysisResult.elongationCount} word(s). Keep words crisp for clarity.</p>
-              </div>
-            )}
-            {analysisResult.fillerWordCount <= 5 && analysisResult.pauseRatio <= 0.3 && analysisResult.elongationCount === 0 && (
-              <p className="text-sm text-primary font-medium">Looking good! Keep practicing to maintain this quality.</p>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Transcript */}
-      {analysisResult?.transcript && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Transcript</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              {analysisResult.transcript}
-            </p>
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
 
       <Button size="lg" className="w-full" onClick={handleSave}>

@@ -15,8 +15,9 @@ import {
   VolumeX,
   CheckCircle2,
 } from "lucide-react";
-import { getClip } from "@/lib/clipStore";
+import { getClip, saveSession } from "@/lib/clipStore";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
+import { useSpeechAnalysis } from "@/hooks/useSpeechAnalysis";
 
 declare global {
   interface Window {
@@ -44,10 +45,16 @@ const Shadow = () => {
   const stopRef = useRef<() => void>(() => {});
 
   const { isRecording, audioUrl, duration, error, start, stop } = useAudioRecorder();
+  const { startListening, stopAndAnalyze } = useSpeechAnalysis();
 
   // Keep refs in sync
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
   useEffect(() => { stopRef.current = stop; }, [stop]);
+
+  const startListeningRef = useRef(startListening);
+  useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
+  const stopAndAnalyzeRef = useRef(stopAndAnalyze);
+  useEffect(() => { stopAndAnalyzeRef.current = stopAndAnalyze; }, [stopAndAnalyze]);
 
   const startRef = useRef(start);
   useEffect(() => { startRef.current = start; }, [start]);
@@ -76,6 +83,7 @@ const Shadow = () => {
           playerRef.current?.seekTo(clip.startTime, true);
           playerRef.current?.playVideo();
           startRef.current();
+          startListeningRef.current();
         },
         onStateChange: (event: any) => {
           if (event.data === window.YT.PlayerState.PLAYING) {
@@ -85,7 +93,9 @@ const Shadow = () => {
                 playerRef.current.pauseVideo();
                 playerRef.current.seekTo(clip.startTime, true);
                 if (intervalRef.current) clearInterval(intervalRef.current);
-                if (isRecordingRef.current) stopRef.current();
+                if (isRecordingRef.current) {
+                  stopRef.current();
+                }
               }
             }, 500);
           } else {
@@ -133,13 +143,30 @@ const Shadow = () => {
 
   // (Auto-play and recording are triggered by onReady in initPlayer)
 
-  // Save recording when audioUrl changes
+  // Save recording and speech metrics when audioUrl changes
   useEffect(() => {
-    if (audioUrl) {
+    if (audioUrl && clip) {
       setRecordings((prev) => [...prev, audioUrl]);
       setRounds((prev) => prev + 1);
+      // Analyze and save shadow session
+      const result = stopAndAnalyzeRef.current(duration);
+      if (result) {
+        saveSession({
+          clipId: clip.id,
+          type: "shadow",
+          wordsPerMinute: result.wordsPerMinute,
+          fillerWordCount: result.fillerWordCount,
+          fillerWordsPerMinute: result.fillerWordsPerMinute,
+          expressionsUsed: result.expressionsUsed,
+          durationSeconds: duration,
+          totalWords: result.totalWords,
+          pauseRatio: result.pauseRatio,
+          vocabularyRichness: result.vocabularyRichness,
+          elongationCount: result.elongationCount,
+        });
+      }
     }
-  }, [audioUrl]);
+  }, [audioUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!clip) {
     return (
