@@ -1,5 +1,6 @@
+import { useState, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Play, Mic, BarChart3, ArrowRight, Eye, MessageCircle, Repeat, Calendar } from "lucide-react";
+import { Play, Mic, BarChart3, ArrowRight, Eye, MessageCircle, Repeat, Calendar, Link } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +17,14 @@ const DAYS = [
 ];
 
 const Index = () => {
+  const [showVideo, setShowVideo] = useState(false);
+  const videoRef = useRef<HTMLDivElement>(null);
+
+  const handleTryVideo = () => {
+    setShowVideo(true);
+    setTimeout(() => videoRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <main className="mx-auto max-w-4xl px-4 py-12 sm:py-20">
@@ -33,7 +42,7 @@ const Index = () => {
         <section className="mb-8">
           <Card className="border-2 border-accent bg-accent/20">
             <CardContent className="p-6 sm:p-8">
-              <h2 className="mb-1 text-2xl font-bold text-foreground">How to Shadow This Clip</h2>
+              <h2 className="mb-1 text-2xl font-bold text-foreground">How to Shadow a Clip</h2>
               <p className="mb-6 text-sm text-muted-foreground">Follow these steps — it's easier than you think!</p>
 
               <div className="space-y-4">
@@ -66,53 +75,64 @@ const Index = () => {
           </Card>
         </section>
 
-        {/* Video */}
-        <section className="mb-8">
-          <Card className="overflow-hidden border-2 border-accent shadow-lg">
-            <CardContent className="p-0">
-              <AspectRatio ratio={16 / 9}>
-                <iframe
-                  className="h-full w-full"
-                  src="https://www.youtube.com/embed/b-m2DntVdQU?start=112&end=210&rel=0&cc_load_policy=1"
-                  title="Example speech clip"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                />
-              </AspectRatio>
-            </CardContent>
-          </Card>
-        </section>
+        {/* Suggestion + CTA Buttons */}
+        {!showVideo && (
+          <section className="mb-14 text-center">
+            <p className="mb-6 text-base text-muted-foreground">
+              We suggest you start with <span className="font-semibold text-foreground">Eileen Gu's</span> video on why she encourages girls to try sports.
+            </p>
+            <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+              <Button size="lg" className="gap-2 text-base" onClick={handleTryVideo}>
+                Try Shadowing This Video <ArrowRight className="h-4 w-4" />
+              </Button>
+              <Button size="lg" variant="outline" className="gap-2 text-base">
+                <Link className="h-4 w-4" /> Use My Own YouTube URL
+              </Button>
+            </div>
+          </section>
+        )}
 
-        {/* CTA */}
-        <section className="mb-14 text-center">
-          <Button size="lg" className="gap-2 text-base">
-            Start Shadowing <ArrowRight className="h-4 w-4" />
-          </Button>
-          <p className="mt-3 text-sm text-muted-foreground">
-            Or paste your own YouTube URL
-          </p>
-        </section>
-
-        {/* 3-Step Overview */}
-        <section className="mb-14">
-          <div className="grid gap-6 sm:grid-cols-3">
-            {[
-              { icon: Play, title: "Select", desc: "Pick a clip from someone you admire" },
-              { icon: Mic, title: "Shadow", desc: "Mimic their tone & expressions" },
-              { icon: BarChart3, title: "Track", desc: "See your fluency improve over time" },
-            ].map((step) => (
-              <Card key={step.title} className="text-center">
-                <CardContent className="flex flex-col items-center gap-3 p-6">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                    <step.icon className="h-6 w-6 text-primary" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-foreground">{step.title}</h3>
-                  <p className="text-sm text-muted-foreground">{step.desc}</p>
+        {/* Video (shown after confirm) */}
+        {showVideo && (
+          <div ref={videoRef}>
+            <section className="mb-8">
+              <Card className="overflow-hidden border-2 border-accent shadow-lg">
+                <CardContent className="p-0">
+                  <AspectRatio ratio={16 / 9}>
+                    <iframe
+                      className="h-full w-full"
+                      src="https://www.youtube.com/embed/b-m2DntVdQU?start=112&end=210&rel=0&cc_load_policy=1"
+                      title="Eileen Gu speech clip"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    />
+                  </AspectRatio>
                 </CardContent>
               </Card>
-            ))}
+            </section>
+
+            {/* 3-Step Overview */}
+            <section className="mb-14">
+              <div className="grid gap-6 sm:grid-cols-3">
+                {[
+                  { icon: Play, title: "Select", desc: "Pick a clip from someone you admire" },
+                  { icon: Mic, title: "Shadow", desc: "Mimic their tone & expressions" },
+                  { icon: BarChart3, title: "Track", desc: "See your fluency improve over time" },
+                ].map((step) => (
+                  <Card key={step.title} className="text-center">
+                    <CardContent className="flex flex-col items-center gap-3 p-6">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+                        <step.icon className="h-6 w-6 text-primary" />
+                      </div>
+                      <h3 className="text-lg font-semibold text-foreground">{step.title}</h3>
+                      <p className="text-sm text-muted-foreground">{step.desc}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </section>
           </div>
-        </section>
+        )}
       </main>
     </div>
   );
