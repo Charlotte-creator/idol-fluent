@@ -39,7 +39,7 @@ const ClipNew = () => {
   };
 
   const duration = endTime - startTime;
-  const isValidDuration = duration >= 30 && duration <= 60;
+  const isValidDuration = duration >= 30 && duration <= 90;
 
   const initPlayer = useCallback(() => {
     if (!videoId || !window.YT?.Player) return;
@@ -103,7 +103,7 @@ const ClipNew = () => {
       <Card>
         <CardHeader>
           <CardTitle>Add a YouTube Clip</CardTitle>
-          <CardDescription>Paste a YouTube URL and select a 30–60 second segment to practice.</CardDescription>
+          <CardDescription>Paste a YouTube URL and select a 30–90 second segment to practice.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           {/* URL Input */}
@@ -165,7 +165,7 @@ const ClipNew = () => {
               </div>
 
               <p className={`text-sm ${isValidDuration ? "text-muted-foreground" : "text-destructive"}`}>
-                Segment duration: {duration}s {!isValidDuration && "(must be 30–60 seconds)"}
+                Segment duration: {duration}s {!isValidDuration && "(must be 30–90 seconds)"}
               </p>
 
               <div className="flex gap-3">
