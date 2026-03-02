@@ -313,7 +313,12 @@ const Shadow = () => {
       )}
 
       {/* Continue */}
-      {rounds >= 1 && (
+      {rounds < 3 && rounds > 0 && (
+        <p className="text-sm text-muted-foreground text-center">
+          {3 - rounds} more round{3 - rounds > 1 ? "s" : ""} to unlock retelling
+        </p>
+      )}
+      {rounds >= 3 && (
         <Button className="w-full" size="lg" onClick={() => navigate(`/clip/${id}/retell`)}>
           Continue to Retelling <ArrowRight className="ml-1 h-4 w-4" />
         </Button>
