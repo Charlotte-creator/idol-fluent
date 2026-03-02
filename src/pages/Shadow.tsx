@@ -19,7 +19,7 @@ const Shadow = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const clip = id ? getClip(id) : undefined;
-  const [showTips, setShowTips] = useState(true);
+  const [showTips, setShowTips] = useState(false);
   const [rounds, setRounds] = useState(0);
   const [recordings, setRecordings] = useState<string[]>([]);
   const playerRef = useRef<any>(null);
