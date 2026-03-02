@@ -33,7 +33,9 @@ const Shadow = () => {
   const clipRaw = id ? getClip(id) : undefined;
   const clip = useMemo(() => clipRaw, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [phase, setPhase] = useState<"env-check" | "countdown" | "practice">("env-check");
+  const [phase, setPhase] = useState<"env-check" | "watch" | "countdown" | "practice">("env-check");
+  const phaseRef = useRef(phase);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
   const [quietConfirmed, setQuietConfirmed] = useState(false);
   const [headphonesConfirmed, setHeadphonesConfirmed] = useState(false);
   const [countdown, setCountdown] = useState(3);
@@ -80,11 +82,13 @@ const Shadow = () => {
       events: {
         onReady: () => {
           playerReadyRef.current = true;
-          // Auto-play and auto-record on first load
           playerRef.current?.seekTo(clip.startTime, true);
           playerRef.current?.playVideo();
-          startRef.current();
-          startListeningRef.current();
+          // Only auto-record in practice phase
+          if (phaseRef.current === "practice") {
+            startRef.current();
+            startListeningRef.current();
+          }
         },
         onStateChange: (event: any) => {
           if (event.data === window.YT.PlayerState.PLAYING) {
@@ -121,9 +125,9 @@ const Shadow = () => {
     };
   }, [clip]);
 
-  // Init player when entering practice phase
+  // Init player when entering watch or practice phase
   useEffect(() => {
-    if (phase !== "practice" || !clip) return;
+    if ((phase !== "watch" && phase !== "practice") || !clip) return;
     if (window.YT?.Player) {
       initPlayer();
     } else {
@@ -241,14 +245,70 @@ const Shadow = () => {
               size="lg"
               disabled={!quietConfirmed || !headphonesConfirmed}
               onClick={() => {
-                setCountdown(3);
-                setPhase("countdown");
+                setPhase("watch");
               }}
             >
               I'm Ready <ArrowRight className="ml-1 h-4 w-4" />
             </Button>
           </CardContent>
         </Card>
+      </div>
+    );
+  }
+
+  // Watch phase
+  if (phase === "watch") {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-8 space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Watch: {clip.title}</h1>
+          <p className="text-sm text-muted-foreground">
+            Clip: {clip.startTime}s – {clip.endTime}s
+          </p>
+        </div>
+
+        <Card className="overflow-hidden">
+          <CardContent className="p-0">
+            <AspectRatio ratio={16 / 9}>
+              <div id="shadow-player" className="h-full w-full" />
+            </AspectRatio>
+          </CardContent>
+        </Card>
+
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={() => {
+            playerRef.current?.seekTo(clip.startTime, true);
+            playerRef.current?.playVideo();
+          }}
+        >
+          <Play className="mr-1 h-4 w-4" /> Play Clip Again
+        </Button>
+
+        <div className="flex items-start gap-2 rounded-md bg-muted/50 p-3">
+          <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+          <p className="text-xs text-muted-foreground">
+            Watch the clip as many times as you need. When you're ready, hit Start Shadowing.
+          </p>
+        </div>
+
+        <Button
+          className="w-full"
+          size="lg"
+          onClick={() => {
+            // Destroy watch player before transitioning
+            if (playerRef.current?.destroy) {
+              playerRef.current.destroy();
+              playerRef.current = null;
+              playerReadyRef.current = false;
+            }
+            setCountdown(3);
+            setPhase("countdown");
+          }}
+        >
+          Start Shadowing <ArrowRight className="ml-1 h-4 w-4" />
+        </Button>
       </div>
     );
   }
