@@ -12,6 +12,21 @@ export interface AnalysisResult {
   expressionsUsed: string[];
   pauseRatio: number;
   vocabularyRichness: number;
+  elongationCount: number;
+  elongationDetails: Record<string, number>;
+}
+
+function detectElongations(text: string): { count: number; details: Record<string, number> } {
+  const regex = /\b\w*([a-z])\1{2,}\w*\b/gi;
+  const details: Record<string, number> = {};
+  let count = 0;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const word = match[0].toLowerCase();
+    details[word] = (details[word] || 0) + 1;
+    count++;
+  }
+  return { count, details };
 }
 
 export function useSpeechAnalysis() {
@@ -101,6 +116,9 @@ export function useSpeechAnalysis() {
             ? Math.round((uniqueWords.size / totalWords) * 100) / 100
             : 0;
 
+          // Elongations
+          const elongations = detectElongations(text);
+
           const analysisResult: AnalysisResult = {
             transcript: fullTranscript.trim(),
             totalWords,
@@ -111,6 +129,8 @@ export function useSpeechAnalysis() {
             expressionsUsed,
             pauseRatio,
             vocabularyRichness,
+            elongationCount: elongations.count,
+            elongationDetails: elongations.details,
           };
 
           setResult(analysisResult);
@@ -214,6 +234,9 @@ export function useSpeechAnalysis() {
         ? Math.round((uniqueWords.size / totalWords) * 100) / 100
         : 0;
 
+      // Elongations
+      const elongations = detectElongations(text);
+
       const analysisResult: AnalysisResult = {
         transcript: text,
         totalWords,
@@ -224,6 +247,8 @@ export function useSpeechAnalysis() {
         expressionsUsed,
         pauseRatio,
         vocabularyRichness,
+        elongationCount: elongations.count,
+        elongationDetails: elongations.details,
       };
 
       setResult(analysisResult);

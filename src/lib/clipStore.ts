@@ -20,6 +20,7 @@ export interface Session {
   totalWords: number;
   pauseRatio: number;
   vocabularyRichness: number;
+  elongationCount: number;
   timeLimitMinutes?: number;
 }
 

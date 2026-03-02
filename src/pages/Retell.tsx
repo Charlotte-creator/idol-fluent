@@ -16,6 +16,9 @@ import {
   Brain,
   Gauge,
   BookOpen,
+  TrendingUp,
+  Pause,
+  Repeat,
 } from "lucide-react";
 import { getClip, saveSession } from "@/lib/clipStore";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
@@ -96,6 +99,7 @@ const Retell = () => {
       totalWords: analysisResult.totalWords,
       pauseRatio: analysisResult.pauseRatio,
       vocabularyRichness: analysisResult.vocabularyRichness,
+      elongationCount: analysisResult.elongationCount,
       timeLimitMinutes: timeLimit,
     });
     navigate("/dashboard");
@@ -287,6 +291,76 @@ const Retell = () => {
                 "{word}" × {count}
               </Badge>
             ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Elongation breakdown */}
+      {analysisResult && Object.keys(analysisResult.elongationDetails).length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Repeat className="h-5 w-5 text-primary" /> Elongations Detected
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            {Object.entries(analysisResult.elongationDetails).map(([word, count]) => (
+              <Badge key={word} variant="secondary">
+                "{word}" × {count}
+              </Badge>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Room for Improvement */}
+      {analysisResult && (
+        <Card className="border-primary/20">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-primary" /> Room for Improvement
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {analysisResult.wordsPerMinute > 0 && analysisResult.wordsPerMinute < 120 && (
+              <div className="flex items-start gap-2 text-sm">
+                <Gauge className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                <p className="text-muted-foreground">Your pace ({analysisResult.wordsPerMinute} WPM) is a bit slow. Aim for 120–160 WPM for natural conversation.</p>
+              </div>
+            )}
+            {analysisResult.wordsPerMinute > 160 && (
+              <div className="flex items-start gap-2 text-sm">
+                <Gauge className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                <p className="text-muted-foreground">Your pace ({analysisResult.wordsPerMinute} WPM) is quite fast. Try slowing down for clarity.</p>
+              </div>
+            )}
+            {analysisResult.wordsPerMinute >= 120 && analysisResult.wordsPerMinute <= 160 && (
+              <div className="flex items-start gap-2 text-sm">
+                <Gauge className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+                <p className="text-muted-foreground">Great pace! {analysisResult.wordsPerMinute} WPM is in the natural conversation range.</p>
+              </div>
+            )}
+            {analysisResult.fillerWordCount > 5 && (
+              <div className="flex items-start gap-2 text-sm">
+                <MessageCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                <p className="text-muted-foreground">Try to reduce filler words — you used {analysisResult.fillerWordCount}. Target: as few as possible.</p>
+              </div>
+            )}
+            {analysisResult.pauseRatio > 0.3 && (
+              <div className="flex items-start gap-2 text-sm">
+                <Pause className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                <p className="text-muted-foreground">You paused for {Math.round(analysisResult.pauseRatio * 100)}% of the time. Try to keep your flow steady.</p>
+              </div>
+            )}
+            {analysisResult.elongationCount > 0 && (
+              <div className="flex items-start gap-2 text-sm">
+                <Repeat className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                <p className="text-muted-foreground">You elongated {analysisResult.elongationCount} word(s). Keep words crisp for clarity.</p>
+              </div>
+            )}
+            {analysisResult.fillerWordCount <= 5 && analysisResult.pauseRatio <= 0.3 && analysisResult.elongationCount === 0 && (
+              <p className="text-sm text-primary font-medium">Looking good! Keep practicing to maintain this quality.</p>
+            )}
           </CardContent>
         </Card>
       )}

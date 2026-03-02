@@ -4,7 +4,17 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { Badge } from "@/components/ui/badge";
-import { Play, Mic, MicOff, Volume2, ArrowRight, Lightbulb } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Play,
+  Mic,
+  MicOff,
+  Volume2,
+  ArrowRight,
+  Headphones,
+  VolumeX,
+  CheckCircle2,
+} from "lucide-react";
 import { getClip } from "@/lib/clipStore";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 
@@ -19,11 +29,16 @@ const Shadow = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const clip = id ? getClip(id) : undefined;
-  const [showTips, setShowTips] = useState(false);
+
+  const [phase, setPhase] = useState<"env-check" | "countdown" | "practice">("env-check");
+  const [quietConfirmed, setQuietConfirmed] = useState(false);
+  const [headphonesConfirmed, setHeadphonesConfirmed] = useState(false);
+  const [countdown, setCountdown] = useState(3);
   const [rounds, setRounds] = useState(0);
   const [recordings, setRecordings] = useState<string[]>([]);
   const playerRef = useRef<any>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const playerReadyRef = useRef(false);
 
   const { isRecording, audioUrl, duration, error, start, stop } = useAudioRecorder();
 
@@ -39,6 +54,9 @@ const Shadow = () => {
         modestbranding: 1,
       },
       events: {
+        onReady: () => {
+          playerReadyRef.current = true;
+        },
         onStateChange: (event: any) => {
           if (event.data === window.YT.PlayerState.PLAYING) {
             intervalRef.current = setInterval(() => {
@@ -47,6 +65,8 @@ const Shadow = () => {
                 playerRef.current.pauseVideo();
                 playerRef.current.seekTo(clip.startTime, true);
                 if (intervalRef.current) clearInterval(intervalRef.current);
+                // Auto-stop recording when clip ends
+                if (isRecording) stop();
               }
             }, 500);
           } else {
@@ -55,25 +75,58 @@ const Shadow = () => {
         },
       },
     });
-  }, [clip]);
+  }, [clip, isRecording, stop]);
 
+  // Load YouTube API early (during env-check)
   useEffect(() => {
-    if (!clip || showTips) return;
-    if (window.YT?.Player) {
-      initPlayer();
-      return;
-    }
+    if (!clip) return;
     if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
       const tag = document.createElement("script");
       tag.src = "https://www.youtube.com/iframe_api";
       document.head.appendChild(tag);
     }
-    window.onYouTubeIframeAPIReady = initPlayer;
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       playerRef.current?.destroy?.();
     };
-  }, [clip, showTips, initPlayer]);
+  }, [clip]);
+
+  // Init player when entering practice phase
+  useEffect(() => {
+    if (phase !== "practice" || !clip) return;
+    if (window.YT?.Player) {
+      initPlayer();
+    } else {
+      window.onYouTubeIframeAPIReady = initPlayer;
+    }
+  }, [phase, clip, initPlayer]);
+
+  // Countdown logic
+  useEffect(() => {
+    if (phase !== "countdown") return;
+    if (countdown <= 0) {
+      setPhase("practice");
+      return;
+    }
+    const timer = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [phase, countdown]);
+
+  // Auto-play video and start recording when practice begins
+  useEffect(() => {
+    if (phase !== "practice") return;
+    // Wait for player to be ready, then play + record
+    const tryStart = setInterval(async () => {
+      if (playerReadyRef.current && playerRef.current) {
+        clearInterval(tryStart);
+        playerRef.current.seekTo(clip!.startTime, true);
+        playerRef.current.playVideo();
+        await start();
+      }
+    }, 200);
+    return () => clearInterval(tryStart);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   // Save recording when audioUrl changes
   useEffect(() => {
@@ -94,35 +147,64 @@ const Shadow = () => {
     );
   }
 
-  if (showTips) {
+  // Environment check phase
+  if (phase === "env-check") {
     return (
-      <div className="mx-auto max-w-2xl px-4 py-8">
+      <div className="mx-auto max-w-2xl px-4 py-8 space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Shadow: {clip.title}</h1>
+          <p className="text-sm text-muted-foreground">
+            Clip: {clip.startTime}s – {clip.endTime}s
+          </p>
+        </div>
+
         <Card className="border-2 border-primary/20">
           <CardHeader>
-            <div className="flex items-center gap-2">
-              <Lightbulb className="h-5 w-5 text-primary" />
-              <CardTitle>Before You Start Shadowing</CardTitle>
-            </div>
-            <CardDescription>Tips to get the most out of your practice</CardDescription>
+            <CardTitle className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-primary" />
+              Environment Check
+            </CardTitle>
+            <CardDescription>Make sure you're set up for the best practice experience.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-3">
-              {[
-                "Focus on mimicking the speaker's tone, rhythm, and expressions.",
-                "Don't worry about being perfect — just try to keep up.",
-                "Pay attention to stressed words and intonation patterns.",
-                "Practice 3–5 rounds for best results.",
-              ].map((tip, i) => (
-                <div key={i} className="flex items-start gap-3">
-                  <Badge variant="secondary" className="mt-0.5 shrink-0">
-                    {i + 1}
-                  </Badge>
-                  <p className="text-sm text-muted-foreground">{tip}</p>
+          <CardContent className="space-y-5">
+            <div className="flex items-start gap-3">
+              <Checkbox
+                id="quiet"
+                checked={quietConfirmed}
+                onCheckedChange={(v) => setQuietConfirmed(v === true)}
+              />
+              <label htmlFor="quiet" className="cursor-pointer space-y-1">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <VolumeX className="h-4 w-4" /> I'm in a quiet environment
                 </div>
-              ))}
+                <p className="text-xs text-muted-foreground">Background noise can affect speech recognition accuracy.</p>
+              </label>
             </div>
-            <Button className="w-full" onClick={() => setShowTips(false)}>
-              Got it, let's start! <ArrowRight className="ml-1 h-4 w-4" />
+
+            <div className="flex items-start gap-3">
+              <Checkbox
+                id="headphones"
+                checked={headphonesConfirmed}
+                onCheckedChange={(v) => setHeadphonesConfirmed(v === true)}
+              />
+              <label htmlFor="headphones" className="cursor-pointer space-y-1">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <Headphones className="h-4 w-4" /> I have headphones on
+                </div>
+                <p className="text-xs text-muted-foreground">Headphones prevent the video audio from being picked up by your mic.</p>
+              </label>
+            </div>
+
+            <Button
+              className="w-full"
+              size="lg"
+              disabled={!quietConfirmed || !headphonesConfirmed}
+              onClick={() => {
+                setCountdown(3);
+                setPhase("countdown");
+              }}
+            >
+              I'm Ready <ArrowRight className="ml-1 h-4 w-4" />
             </Button>
           </CardContent>
         </Card>
@@ -130,6 +212,19 @@ const Shadow = () => {
     );
   }
 
+  // Countdown phase
+  if (phase === "countdown") {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-8 flex flex-col items-center justify-center min-h-[60vh]">
+        <p className="text-sm text-muted-foreground mb-4">Get ready to shadow...</p>
+        <div className="text-9xl font-bold text-primary animate-pulse">
+          {countdown}
+        </div>
+      </div>
+    );
+  }
+
+  // Practice phase
   const formatTime = (s: number) =>
     `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
