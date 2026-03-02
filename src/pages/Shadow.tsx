@@ -48,8 +48,17 @@ const Shadow = () => {
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
   useEffect(() => { stopRef.current = stop; }, [stop]);
 
+  const startRef = useRef(start);
+  useEffect(() => { startRef.current = start; }, [start]);
+
   const initPlayer = useCallback(() => {
     if (!clip || !window.YT?.Player) return;
+    // Destroy previous player if exists
+    if (playerRef.current?.destroy) {
+      playerRef.current.destroy();
+      playerRef.current = null;
+    }
+    playerReadyRef.current = false;
     playerRef.current = new window.YT.Player("shadow-player", {
       videoId: clip.videoId,
       playerVars: {
@@ -58,11 +67,14 @@ const Shadow = () => {
         rel: 0,
         cc_load_policy: 1,
         modestbranding: 1,
-        autoplay: 1,
       },
       events: {
         onReady: () => {
           playerReadyRef.current = true;
+          // Auto-play and auto-record on first load
+          playerRef.current?.seekTo(clip.startTime, true);
+          playerRef.current?.playVideo();
+          startRef.current();
         },
         onStateChange: (event: any) => {
           if (event.data === window.YT.PlayerState.PLAYING) {
@@ -118,22 +130,7 @@ const Shadow = () => {
     return () => clearTimeout(timer);
   }, [phase, countdown]);
 
-  // Auto-play video and start recording when practice begins
-  useEffect(() => {
-    if (phase !== "practice") return;
-    // Start recording immediately
-    start();
-    // Wait for player to be ready, then play
-    const tryStart = setInterval(() => {
-      if (playerReadyRef.current && playerRef.current) {
-        clearInterval(tryStart);
-        playerRef.current.seekTo(clip!.startTime, true);
-        playerRef.current.playVideo();
-      }
-    }, 200);
-    return () => clearInterval(tryStart);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase]);
+  // (Auto-play and recording are triggered by onReady in initPlayer)
 
   // Save recording when audioUrl changes
   useEffect(() => {
