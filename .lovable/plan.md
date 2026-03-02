@@ -1,72 +1,72 @@
 
 
-## Plan: Elongation Detection, Performance Metrics on Results, and Shadow Page Environment Check
+## Reorganize Results Page with Shadow + Retell Metrics Side by Side
 
-### 1. Count Elongations in Speech Analysis
+### What Changes
 
-**File: `src/hooks/useSpeechAnalysis.ts`**
+The Retell results page will be reorganized into 3 metric categories. Each metric will display two numbers: the user's **Retell** score (large, primary) and their latest **Shadow** score for the same clip (smaller, secondary reference).
 
-- Add elongation detection logic that identifies words with repeated vowels/consonants (e.g., "sooo", "ummmm", "yeahhh", "wellll") in the transcript.
-- Use a regex pattern like `/\b\w*([a-z])\1{2,}\w*\b/gi` to catch words with 3+ repeated characters.
-- Add `elongationCount` and `elongationDetails` (word -> count map) to the `AnalysisResult` interface.
-- Compute elongations in both the `analyze` and `stopAndAnalyze` functions.
+To make this possible, the Shadow page needs to start capturing speech metrics during practice rounds.
 
-**Note:** Web Speech API often normalizes elongations (e.g., "sooo" becomes "so"), so detection may be limited. We'll still include the logic for cases where it does come through, and display it alongside filler words.
-
-### 2. Show Performance Metrics on the Retell Results Page
-
-**File: `src/pages/Retell.tsx`**
-
-On the results phase, add a new card section titled something like "Room for Improvement" that shows:
-- **Elongation count** (new metric from above)
-- **Pause ratio** (already computed but not displayed) — shows how much silence vs. speaking
-- **Filler words per minute** (already shown, but can be contextualized with a "target: 0" indicator)
-- A brief qualitative summary (e.g., "Your pace is good" if WPM is 120-160, "Try to reduce filler words" if filler count > 5)
-
-This gives users actionable feedback right after their retelling.
-
-### 3. Shadow Page: Environment Check + Countdown + Auto-Play/Record
+### 1. Add Speech Analysis to Shadow Page
 
 **File: `src/pages/Shadow.tsx`**
 
-Replace the current immediate-load flow with a phased approach:
+- Import `useSpeechAnalysis` hook (already used in Retell).
+- Call `startListening()` when recording starts (inside `onReady` callback).
+- Call `stopAndAnalyze()` when recording stops.
+- Save each shadow round as a session via `saveSession()` with `type: "shadow"`.
+- This means every shadow round will produce stored metrics (WPM, fillers, elongations, vocabulary richness, total words, pause ratio).
 
-- **Phase 1 — Environment Check**: Show a card asking the user to confirm:
-  - "Are you in a quiet environment?"
-  - "Do you have headphones on?"
-  - A single "I'm Ready" button (with checkboxes or just a confirmation button)
-  
-- **Phase 2 — Countdown**: After confirmation, show a 3-2-1 countdown overlay/animation.
+### 2. Reorganize Retell Results Page into 3 Categories
 
-- **Phase 3 — Practice**: After countdown hits 0:
-  - Automatically play the video (`playerRef.current.playVideo()`)
-  - Automatically start recording (`start()`)
-  - The user sees the video + a "Stop" button
-  - When the clip ends (detected by the existing interval), auto-stop recording too.
+**File: `src/pages/Retell.tsx`**
 
-**State changes:**
-- Add a `phase` state: `"env-check" | "countdown" | "practice"`
-- Default to `"env-check"` instead of jumping straight to the video
-- Countdown uses a `useEffect` with a 1-second interval for 3 ticks
-- YouTube player is initialized during env-check but kept paused until countdown completes
+Fetch the latest shadow session for the same clip using `getSessionsForClip(clipId)` filtered by `type: "shadow"`, sorted by date descending.
 
----
+Replace the current flat metric grid with 3 organized sections:
+
+**Section 1 -- Voice Features**
+| Metric | User (Retell) | Shadow Reference |
+|--------|--------------|-----------------|
+| Words Per Minute | Large number | Smaller shadow number |
+
+(Pitch is not yet available -- will show a "Coming soon" placeholder.)
+
+**Section 2 -- Speech Fluency**
+| Metric | User (Retell) | Shadow Reference |
+|--------|--------------|-----------------|
+| Filler Words | Large number | Smaller shadow number |
+| Elongations | Large number | Smaller shadow number |
+
+Below this, show the filler word and elongation breakdown badges (kept from current design).
+
+**Section 3 -- Content Strength**
+| Metric | User (Retell) | Shadow Reference |
+|--------|--------------|-----------------|
+| Vocabulary Richness | Large percentage | Smaller shadow percentage |
+| Total Words | Large number | Smaller shadow number |
+
+Each metric card will show:
+- The retell score as a large bold number
+- The shadow score as a smaller muted number below, labeled "Shadow: X"
+- If no shadow data exists, show "--" for the shadow reference
+
+The "Room for Improvement", "Transcript", and audio playback sections remain at the bottom, unchanged.
 
 ### Technical Details
 
-**`AnalysisResult` interface changes:**
-```
-elongationCount: number;
-elongationDetails: Record<string, number>;
-```
+**Shadow.tsx changes:**
+- Import `useSpeechAnalysis` and `saveSession` from their respective modules
+- Wire `startListening()` into the recording start flow
+- On recording stop, call `stopAndAnalyze(duration)` and `saveSession(...)` with `type: "shadow"`
+- No UI changes needed on the Shadow page itself (metrics are saved silently)
 
-**Shadow.tsx phase flow:**
-```text
-[env-check] --> user clicks "I'm Ready" --> [countdown: 3..2..1] --> [practice: video plays + recording starts]
-```
+**Retell.tsx changes:**
+- Import `getSessionsForClip` from clipStore
+- Use `useMemo` to find the latest shadow session: `getSessionsForClip(clipId).filter(s => s.type === "shadow").sort(by date).pop()`
+- Restructure the results JSX into 3 `Card` sections with section headers
+- Each metric displays two numbers side by side or stacked
 
-**Files modified:**
-1. `src/hooks/useSpeechAnalysis.ts` — add elongation detection + new fields
-2. `src/pages/Retell.tsx` — display elongations + improvement tips on results page
-3. `src/pages/Shadow.tsx` — add environment check phase, countdown, auto-play + auto-record
-4. `src/lib/clipStore.ts` — add `elongationCount` to `Session` interface
+**No changes needed to `clipStore.ts`** -- the Session interface already supports `type: "shadow" | "retell"` and all the required fields.
+
