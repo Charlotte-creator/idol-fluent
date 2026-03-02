@@ -16,16 +16,42 @@ export interface AnalysisResult {
   elongationDetails: Record<string, number>;
 }
 
+const HESITATION_SOUNDS = ["hmm", "hm", "ah", "er", "oh", "mm", "uh huh"];
+
 function detectElongations(text: string): { count: number; details: Record<string, number> } {
-  const regex = /\b\w*([a-z])\1{2,}\w*\b/gi;
   const details: Record<string, number> = {};
   let count = 0;
+
+  // 1. Repeated consecutive words (stuttering): "I I I", "the the"
+  const repeatedWordRegex = /\b(\w+)(\s+\1){1,}\b/gi;
   let match;
-  while ((match = regex.exec(text)) !== null) {
-    const word = match[0].toLowerCase();
-    details[word] = (details[word] || 0) + 1;
+  while ((match = repeatedWordRegex.exec(text)) !== null) {
+    const label = match[0].toLowerCase();
+    details[label] = (details[label] || 0) + 1;
     count++;
   }
+
+  // 2. Hesitation sounds: "hmm", "ah", "er", etc.
+  for (const h of HESITATION_SOUNDS) {
+    const regex = new RegExp(`\\b${h}\\b`, "gi");
+    const matches = text.match(regex);
+    if (matches) {
+      details[h] = (details[h] || 0) + matches.length;
+      count += matches.length;
+    }
+  }
+
+  // 3. Original repeated-character fallback (e.g., "soooo")
+  const charRepeatRegex = /\b\w*([a-z])\1{2,}\w*\b/gi;
+  while ((match = charRepeatRegex.exec(text)) !== null) {
+    const word = match[0].toLowerCase();
+    // Avoid double-counting if already caught by hesitation sounds
+    if (!HESITATION_SOUNDS.includes(word)) {
+      details[word] = (details[word] || 0) + 1;
+      count++;
+    }
+  }
+
   return { count, details };
 }
 

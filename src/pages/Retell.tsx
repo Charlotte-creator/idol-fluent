@@ -20,6 +20,7 @@ import {
   Pause,
   Repeat,
   Volume2,
+  Lightbulb,
 } from "lucide-react";
 import { getClip, saveSession, getSessionsForClip } from "@/lib/clipStore";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
@@ -161,6 +162,42 @@ const Retell = () => {
                 </div>
               ))}
             </RadioGroup>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Lightbulb className="h-5 w-5 text-primary" /> Retelling Tips
+            </CardTitle>
+            <CardDescription>Structure your response for clarity and impact.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-foreground">Structure</p>
+              <ul className="space-y-1 text-sm text-muted-foreground list-disc list-inside">
+                <li>Start with a clear main idea or thesis</li>
+                <li>Support with 2–3 key arguments or examples</li>
+                <li>End with a brief conclusion or summary</li>
+              </ul>
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-foreground">Useful Phrases</p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  "The speaker argued that...",
+                  "One key point was...",
+                  "In contrast to...",
+                  "To summarize...",
+                  "Another important aspect is...",
+                  "This suggests that...",
+                ].map((phrase) => (
+                  <Badge key={phrase} variant="secondary" className="text-xs">
+                    {phrase}
+                  </Badge>
+                ))}
+              </div>
+            </div>
           </CardContent>
         </Card>
 
