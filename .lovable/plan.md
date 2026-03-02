@@ -1,76 +1,56 @@
 
 
-## Four Changes: Shadow Reminder, Elongation Detection, Dashboard Fixes, Retell Tips
+## Add a "Watch First" Phase to the Shadow Flow
 
-### 1. Add Slow Playback Speed Reminder (Shadow.tsx)
+### What Changes
 
-Add an informational tip in the environment check phase, between the headphones checkbox and the "I'm Ready" button:
+A new **"watch" phase** is inserted between the environment check and the countdown/practice phases. This lets users watch the clip once (or multiple times) before committing to shadowing with recording.
 
-> "Tip: You can use the YouTube player's settings gear icon to slow down the playback speed if the speaker is too fast."
+### Updated Flow
 
-Uses an `Info` icon from lucide-react. Styled as a subtle muted text block, not a checkbox.
+```text
+env-check --> watch --> countdown --> practice
+```
 
-### 2. Improve Elongation/Hesitation Detection (useSpeechAnalysis.ts)
+### Implementation (Shadow.tsx only)
 
-The current `detectElongations` regex looks for 3+ repeated characters (e.g., "soooo"), but the Web Speech API normalizes text, so this almost never matches. Replace with detection of:
+**1. Update the phase state type**
 
-- **Repeated consecutive words** (stuttering): "I I I", "the the" using regex `/\b(\w+)(\s+\1){1,}\b/gi`
-- **Hesitation sounds**: "hmm", "hm", "ah", "er", "oh", "uh huh" counted via word matching
-- **Keep original regex** as fallback
+Add `"watch"` to the phase union:
+```
+useState<"env-check" | "watch" | "countdown" | "practice">("env-check")
+```
 
-The field names (`elongationCount`, `elongationDetails`) stay the same to avoid breaking changes. The label on the results page will say "Hesitations" instead of "Elongations".
+The "I'm Ready" button in env-check will now transition to `"watch"` instead of `"countdown"`.
 
-### 3. Fix Dashboard WPM Bug + Split Charts by Type
+**2. Load the YouTube player during the watch phase**
 
-**WPM Bug**: The 1300 WPM entry is caused by a race condition in Shadow.tsx. When `audioUrl` changes, the `useEffect` reads `duration` from React state, but due to batching, `duration` may still be 0 or 1 second when the effect fires. Fix: compute duration directly from `startTimeRef.current` at analysis time instead of relying on the state variable. Also add a guard: if `durationSeconds < 3`, skip saving the session (too short to be meaningful).
+Update the player init `useEffect` to trigger on both `"watch"` and `"practice"` phases. During the watch phase, the `onReady` callback will NOT auto-start recording -- it will just play the video normally.
 
-**Split Charts**: Currently the line charts plot all sessions (shadow + retell) on a single line each. Change each chart (WPM and Fillers/min) to show two lines:
-- A primary-colored line for **retell** sessions
-- A secondary/muted line for **shadow** sessions
+To distinguish behavior, use a ref or check the current phase: in `"watch"` mode, `onReady` plays the video but skips `startRef.current()` and `startListeningRef.current()`.
 
-Chart data will be restructured to group by date and include `retellWpm`, `shadowWpm`, `retellFillers`, `shadowFillers`. The chart config will define both series with distinct colors.
+The player container `<div id="shadow-player">` will be rendered in both the watch and practice phases (or use separate IDs like `"watch-player"` and `"shadow-player"` to avoid conflicts when transitioning).
 
-### 4. Add Retelling Tips to Retell Setup Page (Retell.tsx)
+**3. Render the watch phase UI**
 
-Add a tips card in the **setup phase** (before the user starts recording) with structured speaking advice:
+Between env-check and countdown, show:
 
-**Structure Tips:**
-- "Start with a clear main idea or thesis"
-- "Support with 2-3 key arguments or examples"
-- "End with a brief conclusion or summary"
+- The clip title and time range
+- The YouTube player (embedded, playable, with controls)
+- A "Play Clip" button to replay the segment
+- A prominent "Start Shadowing" button that transitions to the countdown phase
+- A helpful note: "Watch the clip as many times as you need. When you're ready, hit Start Shadowing."
 
-**Useful Phrases to Practice:**
-Display as badges/chips the user can mentally rehearse:
-- "The speaker argued that..."
-- "One key point was..."
-- "In contrast to..."
-- "To summarize..."
-- "Another important aspect is..."
-- "This suggests that..."
+**4. Transition from watch to practice**
 
-This appears as a collapsible or always-visible card between the time limit selector and the "Start Retelling" button.
-
----
+When the user clicks "Start Shadowing":
+- Destroy the watch player instance
+- Set phase to `"countdown"` (which triggers the 3-second countdown, then practice as before)
+- The practice phase creates a fresh player with auto-record behavior
 
 ### Technical Details
 
-**Shadow.tsx**
-- Add `Info` icon import
-- Add tip JSX in env-check phase (lines 228-229 area)
-- Fix duration bug: use `Date.now() - startTimeRef` to compute actual duration in the `audioUrl` effect, add `durationSeconds < 3` guard before `saveSession`
-- Need to expose `startTimeRef` or compute inline
-
-**useSpeechAnalysis.ts**
-- Rewrite `detectElongations` function (lines 19-30) to include repeated words, hesitation sounds, and original fallback
-- No interface changes needed
-
-**Dashboard.tsx**
-- Restructure `chartData` useMemo to produce objects with `retellWpm`, `shadowWpm`, `retellFillers`, `shadowFillers` grouped by date
-- Add second `Line` to each `LineChart` with different color
-- Update `ChartContainer` config to include both series
-- Optionally filter out sessions with WPM > 300 as outliers (sanity cap)
-
-**Retell.tsx**
-- Add a tips `Card` in the setup phase JSX with structure advice and phrase badges
-- Import `Lightbulb` icon from lucide-react
-
+- The `initPlayer` callback needs a parameter or ref to know whether to auto-record. Simplest approach: add a `phaseRef` that tracks the current phase, and in `onReady`, check `phaseRef.current === "practice"` before calling `startRef` and `startListeningRef`.
+- Player cleanup between watch and practice: destroy the player when leaving the watch phase (in the "Start Shadowing" click handler or via an effect), so the practice phase can create a fresh one.
+- The watch phase player uses the same `id="shadow-player"` div, but the effect that initializes it will now fire for both `"watch"` and `"practice"` phases. The existing cleanup in the effect handles destroying the old player before creating a new one.
+- No changes to clipStore, hooks, or other pages.
