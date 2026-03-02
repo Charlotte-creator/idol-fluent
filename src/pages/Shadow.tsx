@@ -110,7 +110,6 @@ const Shadow = () => {
               {[
                 "Focus on mimicking the speaker's tone, rhythm, and expressions.",
                 "Don't worry about being perfect — just try to keep up.",
-                "If you can't follow sentence by sentence, go word by word.",
                 "Pay attention to stressed words and intonation patterns.",
                 "Practice 3–5 rounds for best results.",
               ].map((tip, i) => (
