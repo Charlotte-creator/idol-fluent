@@ -1,72 +1,76 @@
 
 
-## Reorganize Results Page with Shadow + Retell Metrics Side by Side
+## Four Changes: Shadow Reminder, Elongation Detection, Dashboard Fixes, Retell Tips
 
-### What Changes
+### 1. Add Slow Playback Speed Reminder (Shadow.tsx)
 
-The Retell results page will be reorganized into 3 metric categories. Each metric will display two numbers: the user's **Retell** score (large, primary) and their latest **Shadow** score for the same clip (smaller, secondary reference).
+Add an informational tip in the environment check phase, between the headphones checkbox and the "I'm Ready" button:
 
-To make this possible, the Shadow page needs to start capturing speech metrics during practice rounds.
+> "Tip: You can use the YouTube player's settings gear icon to slow down the playback speed if the speaker is too fast."
 
-### 1. Add Speech Analysis to Shadow Page
+Uses an `Info` icon from lucide-react. Styled as a subtle muted text block, not a checkbox.
 
-**File: `src/pages/Shadow.tsx`**
+### 2. Improve Elongation/Hesitation Detection (useSpeechAnalysis.ts)
 
-- Import `useSpeechAnalysis` hook (already used in Retell).
-- Call `startListening()` when recording starts (inside `onReady` callback).
-- Call `stopAndAnalyze()` when recording stops.
-- Save each shadow round as a session via `saveSession()` with `type: "shadow"`.
-- This means every shadow round will produce stored metrics (WPM, fillers, elongations, vocabulary richness, total words, pause ratio).
+The current `detectElongations` regex looks for 3+ repeated characters (e.g., "soooo"), but the Web Speech API normalizes text, so this almost never matches. Replace with detection of:
 
-### 2. Reorganize Retell Results Page into 3 Categories
+- **Repeated consecutive words** (stuttering): "I I I", "the the" using regex `/\b(\w+)(\s+\1){1,}\b/gi`
+- **Hesitation sounds**: "hmm", "hm", "ah", "er", "oh", "uh huh" counted via word matching
+- **Keep original regex** as fallback
 
-**File: `src/pages/Retell.tsx`**
+The field names (`elongationCount`, `elongationDetails`) stay the same to avoid breaking changes. The label on the results page will say "Hesitations" instead of "Elongations".
 
-Fetch the latest shadow session for the same clip using `getSessionsForClip(clipId)` filtered by `type: "shadow"`, sorted by date descending.
+### 3. Fix Dashboard WPM Bug + Split Charts by Type
 
-Replace the current flat metric grid with 3 organized sections:
+**WPM Bug**: The 1300 WPM entry is caused by a race condition in Shadow.tsx. When `audioUrl` changes, the `useEffect` reads `duration` from React state, but due to batching, `duration` may still be 0 or 1 second when the effect fires. Fix: compute duration directly from `startTimeRef.current` at analysis time instead of relying on the state variable. Also add a guard: if `durationSeconds < 3`, skip saving the session (too short to be meaningful).
 
-**Section 1 -- Voice Features**
-| Metric | User (Retell) | Shadow Reference |
-|--------|--------------|-----------------|
-| Words Per Minute | Large number | Smaller shadow number |
+**Split Charts**: Currently the line charts plot all sessions (shadow + retell) on a single line each. Change each chart (WPM and Fillers/min) to show two lines:
+- A primary-colored line for **retell** sessions
+- A secondary/muted line for **shadow** sessions
 
-(Pitch is not yet available -- will show a "Coming soon" placeholder.)
+Chart data will be restructured to group by date and include `retellWpm`, `shadowWpm`, `retellFillers`, `shadowFillers`. The chart config will define both series with distinct colors.
 
-**Section 2 -- Speech Fluency**
-| Metric | User (Retell) | Shadow Reference |
-|--------|--------------|-----------------|
-| Filler Words | Large number | Smaller shadow number |
-| Elongations | Large number | Smaller shadow number |
+### 4. Add Retelling Tips to Retell Setup Page (Retell.tsx)
 
-Below this, show the filler word and elongation breakdown badges (kept from current design).
+Add a tips card in the **setup phase** (before the user starts recording) with structured speaking advice:
 
-**Section 3 -- Content Strength**
-| Metric | User (Retell) | Shadow Reference |
-|--------|--------------|-----------------|
-| Vocabulary Richness | Large percentage | Smaller shadow percentage |
-| Total Words | Large number | Smaller shadow number |
+**Structure Tips:**
+- "Start with a clear main idea or thesis"
+- "Support with 2-3 key arguments or examples"
+- "End with a brief conclusion or summary"
 
-Each metric card will show:
-- The retell score as a large bold number
-- The shadow score as a smaller muted number below, labeled "Shadow: X"
-- If no shadow data exists, show "--" for the shadow reference
+**Useful Phrases to Practice:**
+Display as badges/chips the user can mentally rehearse:
+- "The speaker argued that..."
+- "One key point was..."
+- "In contrast to..."
+- "To summarize..."
+- "Another important aspect is..."
+- "This suggests that..."
 
-The "Room for Improvement", "Transcript", and audio playback sections remain at the bottom, unchanged.
+This appears as a collapsible or always-visible card between the time limit selector and the "Start Retelling" button.
+
+---
 
 ### Technical Details
 
-**Shadow.tsx changes:**
-- Import `useSpeechAnalysis` and `saveSession` from their respective modules
-- Wire `startListening()` into the recording start flow
-- On recording stop, call `stopAndAnalyze(duration)` and `saveSession(...)` with `type: "shadow"`
-- No UI changes needed on the Shadow page itself (metrics are saved silently)
+**Shadow.tsx**
+- Add `Info` icon import
+- Add tip JSX in env-check phase (lines 228-229 area)
+- Fix duration bug: use `Date.now() - startTimeRef` to compute actual duration in the `audioUrl` effect, add `durationSeconds < 3` guard before `saveSession`
+- Need to expose `startTimeRef` or compute inline
 
-**Retell.tsx changes:**
-- Import `getSessionsForClip` from clipStore
-- Use `useMemo` to find the latest shadow session: `getSessionsForClip(clipId).filter(s => s.type === "shadow").sort(by date).pop()`
-- Restructure the results JSX into 3 `Card` sections with section headers
-- Each metric displays two numbers side by side or stacked
+**useSpeechAnalysis.ts**
+- Rewrite `detectElongations` function (lines 19-30) to include repeated words, hesitation sounds, and original fallback
+- No interface changes needed
 
-**No changes needed to `clipStore.ts`** -- the Session interface already supports `type: "shadow" | "retell"` and all the required fields.
+**Dashboard.tsx**
+- Restructure `chartData` useMemo to produce objects with `retellWpm`, `shadowWpm`, `retellFillers`, `shadowFillers` grouped by date
+- Add second `Line` to each `LineChart` with different color
+- Update `ChartContainer` config to include both series
+- Optionally filter out sessions with WPM > 300 as outliers (sanity cap)
+
+**Retell.tsx**
+- Add a tips `Card` in the setup phase JSX with structure advice and phrase badges
+- Import `Lightbulb` icon from lucide-react
 
