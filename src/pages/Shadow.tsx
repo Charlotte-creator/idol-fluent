@@ -39,8 +39,14 @@ const Shadow = () => {
   const playerRef = useRef<any>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const playerReadyRef = useRef(false);
+  const isRecordingRef = useRef(false);
+  const stopRef = useRef<() => void>(() => {});
 
   const { isRecording, audioUrl, duration, error, start, stop } = useAudioRecorder();
+
+  // Keep refs in sync
+  useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
+  useEffect(() => { stopRef.current = stop; }, [stop]);
 
   const initPlayer = useCallback(() => {
     if (!clip || !window.YT?.Player) return;
@@ -52,6 +58,7 @@ const Shadow = () => {
         rel: 0,
         cc_load_policy: 1,
         modestbranding: 1,
+        autoplay: 1,
       },
       events: {
         onReady: () => {
@@ -65,8 +72,7 @@ const Shadow = () => {
                 playerRef.current.pauseVideo();
                 playerRef.current.seekTo(clip.startTime, true);
                 if (intervalRef.current) clearInterval(intervalRef.current);
-                // Auto-stop recording when clip ends
-                if (isRecording) stop();
+                if (isRecordingRef.current) stopRef.current();
               }
             }, 500);
           } else {
@@ -75,7 +81,7 @@ const Shadow = () => {
         },
       },
     });
-  }, [clip, isRecording, stop]);
+  }, [clip]);
 
   // Load YouTube API early (during env-check)
   useEffect(() => {
@@ -115,13 +121,14 @@ const Shadow = () => {
   // Auto-play video and start recording when practice begins
   useEffect(() => {
     if (phase !== "practice") return;
-    // Wait for player to be ready, then play + record
-    const tryStart = setInterval(async () => {
+    // Start recording immediately
+    start();
+    // Wait for player to be ready, then play
+    const tryStart = setInterval(() => {
       if (playerReadyRef.current && playerRef.current) {
         clearInterval(tryStart);
         playerRef.current.seekTo(clip!.startTime, true);
         playerRef.current.playVideo();
-        await start();
       }
     }, 200);
     return () => clearInterval(tryStart);
