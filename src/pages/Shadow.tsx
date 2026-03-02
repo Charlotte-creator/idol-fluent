@@ -169,6 +169,7 @@ const Shadow = () => {
           pauseRatio: result.pauseRatio,
           vocabularyRichness: result.vocabularyRichness,
           elongationCount: result.elongationCount,
+          transcript: result.transcript,
         });
       }
     }

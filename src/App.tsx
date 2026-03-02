@@ -8,6 +8,7 @@ import Index from "./pages/Index";
 import ClipNew from "./pages/ClipNew";
 import Shadow from "./pages/Shadow";
 import Retell from "./pages/Retell";
+import SessionDetail from "./pages/SessionDetail";
 import Dashboard from "./pages/Dashboard";
 import NotFound from "./pages/NotFound";
 
@@ -25,6 +26,7 @@ const App = () => (
           <Route path="/clip/new" element={<ClipNew />} />
           <Route path="/clip/:id/shadow" element={<Shadow />} />
           <Route path="/clip/:id/retell" element={<Retell />} />
+          <Route path="/session/:sessionId" element={<SessionDetail />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
