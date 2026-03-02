@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Play, Mic, BarChart3, ArrowRight, Eye, MessageCircle, Repeat, Calendar, Link } from "lucide-react";
+import { saveClip } from "@/lib/clipStore";
 import { Button } from "@/components/ui/button";
 import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { Badge } from "@/components/ui/badge";
@@ -89,12 +91,13 @@ const useYouTubeClip = (containerId: string, shouldLoad: boolean) => {
 const Index = () => {
   const [showVideo, setShowVideo] = useState(false);
   const videoRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
   useYouTubeClip("yt-player", showVideo);
 
   const handleTryVideo = () => {
-    setShowVideo(true);
-    setTimeout(() => videoRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+    const clip = saveClip({ videoId: VIDEO_ID, title: "Eileen Gu – Why Girls Should Try Sports", startTime: CLIP_START, endTime: CLIP_END });
+    navigate(`/clip/${clip.id}/shadow`);
   };
 
   return (
@@ -157,7 +160,7 @@ const Index = () => {
               <Button size="lg" className="gap-2 text-base" onClick={handleTryVideo}>
                 Try Shadowing This Video <ArrowRight className="h-4 w-4" />
               </Button>
-              <Button size="lg" variant="outline" className="gap-2 text-base">
+              <Button size="lg" variant="outline" className="gap-2 text-base" onClick={() => navigate("/clip/new")}>
                 <Link className="h-4 w-4" /> Use My Own YouTube URL
               </Button>
             </div>
