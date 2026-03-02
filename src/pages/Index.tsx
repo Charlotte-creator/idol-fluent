@@ -1,9 +1,13 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Play, Mic, BarChart3, ArrowRight, Eye, MessageCircle, Repeat, Calendar, Link } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { Badge } from "@/components/ui/badge";
+
+const CLIP_START = 112;
+const CLIP_END = 210;
+const VIDEO_ID = "b-m2DntVdQU";
 
 const STEPS = [
   { icon: Eye, num: "1", title: "Watch & Listen", desc: "Play the clip with subtitles on. Just listen the first time." },
@@ -16,9 +20,77 @@ const DAYS = [
   { label: "Day 3+", desc: "Start matching the speaker's tone, rhythm, and expressions.", color: "bg-accent text-accent-foreground" },
 ];
 
+declare global {
+  interface Window {
+    YT: any;
+    onYouTubeIframeAPIReady: () => void;
+  }
+}
+
+const useYouTubeClip = (containerId: string, shouldLoad: boolean) => {
+  const playerRef = useRef<any>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const initPlayer = useCallback(() => {
+    if (!window.YT?.Player) return;
+    playerRef.current = new window.YT.Player(containerId, {
+      videoId: VIDEO_ID,
+      playerVars: {
+        start: CLIP_START,
+        end: CLIP_END,
+        rel: 0,
+        cc_load_policy: 1,
+        modestbranding: 1,
+      },
+      events: {
+        onStateChange: (event: any) => {
+          if (event.data === window.YT.PlayerState.PLAYING) {
+            // Poll to enforce end time
+            intervalRef.current = setInterval(() => {
+              const time = playerRef.current?.getCurrentTime?.();
+              if (time && time >= CLIP_END) {
+                playerRef.current.pauseVideo();
+                playerRef.current.seekTo(CLIP_START, true);
+                if (intervalRef.current) clearInterval(intervalRef.current);
+              }
+            }, 500);
+          } else {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+          }
+        },
+      },
+    });
+  }, [containerId]);
+
+  useEffect(() => {
+    if (!shouldLoad) return;
+
+    if (window.YT?.Player) {
+      initPlayer();
+      return;
+    }
+
+    // Load the API script if not yet loaded
+    if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+      const tag = document.createElement("script");
+      tag.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(tag);
+    }
+
+    window.onYouTubeIframeAPIReady = initPlayer;
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      playerRef.current?.destroy?.();
+    };
+  }, [shouldLoad, initPlayer]);
+};
+
 const Index = () => {
   const [showVideo, setShowVideo] = useState(false);
   const videoRef = useRef<HTMLDivElement>(null);
+
+  useYouTubeClip("yt-player", showVideo);
 
   const handleTryVideo = () => {
     setShowVideo(true);
@@ -99,13 +171,7 @@ const Index = () => {
               <Card className="overflow-hidden border-2 border-accent shadow-lg">
                 <CardContent className="p-0">
                   <AspectRatio ratio={16 / 9}>
-                    <iframe
-                      className="h-full w-full"
-                      src="https://www.youtube.com/embed/b-m2DntVdQU?start=112&end=210&rel=0&cc_load_policy=1"
-                      title="Eileen Gu speech clip"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                    />
+                    <div id="yt-player" className="h-full w-full" />
                   </AspectRatio>
                 </CardContent>
               </Card>
