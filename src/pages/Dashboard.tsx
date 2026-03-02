@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -11,7 +11,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
-import { getSessions, getClips } from "@/lib/clipStore";
+import { getSessions, getClips, type Session } from "@/lib/clipStore";
+import { SessionDetailDialog } from "@/components/SessionDetailDialog";
 import { BarChart3, Mic, Gauge, Flame, Plus } from "lucide-react";
 import {
   ChartContainer,
@@ -25,6 +26,7 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const sessions = getSessions();
   const clips = getClips();
+  const [selectedSession, setSelectedSession] = useState<Session | null>(null);
 
   const clipMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -216,7 +218,11 @@ const Dashboard = () => {
             </TableHeader>
             <TableBody>
               {[...sessions].reverse().map((s) => (
-                <TableRow key={s.id}>
+                <TableRow
+                  key={s.id}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => setSelectedSession(s)}
+                >
                   <TableCell className="text-muted-foreground">
                     {format(new Date(s.date), "MMM d, yyyy")}
                   </TableCell>
@@ -237,6 +243,12 @@ const Dashboard = () => {
           </Table>
         </CardContent>
       </Card>
+      <SessionDetailDialog
+        session={selectedSession}
+        clipName={selectedSession ? (clipMap[selectedSession.clipId] || "Unknown") : ""}
+        open={!!selectedSession}
+        onOpenChange={(open) => !open && setSelectedSession(null)}
+      />
     </div>
   );
 };
