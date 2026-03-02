@@ -1,56 +1,52 @@
 
 
-## Add a "Watch First" Phase to the Shadow Flow
+## Session Detail Page with Transcript and Video
 
-### What Changes
+### Overview
 
-A new **"watch" phase** is inserted between the environment check and the countdown/practice phases. This lets users watch the clip once (or multiple times) before committing to shadowing with recording.
+Replace the current session detail dialog with a dedicated page at `/session/:sessionId`. When users click a row in the dashboard session history, they navigate to this page showing full metrics, their speech transcript, and the original YouTube clip side by side.
 
-### Updated Flow
+### Changes Required
 
-```text
-env-check --> watch --> countdown --> practice
-```
+#### 1. Add `transcript` field to Session (clipStore.ts)
 
-### Implementation (Shadow.tsx only)
+Add `transcript?: string` to the `Session` interface so the user's speech text is persisted with the session.
 
-**1. Update the phase state type**
+#### 2. Save transcript in Shadow.tsx and Retell.tsx
 
-Add `"watch"` to the phase union:
-```
-useState<"env-check" | "watch" | "countdown" | "practice">("env-check")
-```
+- **Shadow.tsx**: In the `audioUrl` effect (~line 160), add `transcript: result.transcript` to the `saveSession` call.
+- **Retell.tsx**: In `handleSave` (~line 101), add `transcript: analysisResult.transcript` to the `saveSession` call.
 
-The "I'm Ready" button in env-check will now transition to `"watch"` instead of `"countdown"`.
+#### 3. Create SessionDetail page (new file: `src/pages/SessionDetail.tsx`)
 
-**2. Load the YouTube player during the watch phase**
+A full page with a two-column layout:
 
-Update the player init `useEffect` to trigger on both `"watch"` and `"practice"` phases. During the watch phase, the `onReady` callback will NOT auto-start recording -- it will just play the video normally.
+**Left column:**
+- Session type badge, clip name, date
+- All metrics (WPM, total words, fillers, fillers/min, hesitations, vocabulary richness, pause ratio, duration, time limit) using Card components
+- User's speech transcript
+- Audio player (if available -- note: audio URLs from blob storage won't persist across page loads, so show transcript only for historical sessions)
 
-To distinguish behavior, use a ref or check the current phase: in `"watch"` mode, `onReady` plays the video but skips `startRef.current()` and `startListeningRef.current()`.
+**Right column:**
+- YouTube embed via iframe: `https://www.youtube.com/embed/{videoId}?start={startTime}&end={endTime}`
+- Back to Dashboard button
 
-The player container `<div id="shadow-player">` will be rendered in both the watch and practice phases (or use separate IDs like `"watch-player"` and `"shadow-player"` to avoid conflicts when transitioning).
+On mobile, columns stack vertically (video on top).
 
-**3. Render the watch phase UI**
+#### 4. Update Dashboard navigation (Dashboard.tsx)
 
-Between env-check and countdown, show:
+- Replace `setSelectedSession(s)` with `navigate(`/session/${s.id}`)` on row click
+- Remove `SessionDetailDialog` import and usage
+- Remove `selectedSession` state
 
-- The clip title and time range
-- The YouTube player (embedded, playable, with controls)
-- A "Play Clip" button to replay the segment
-- A prominent "Start Shadowing" button that transitions to the countdown phase
-- A helpful note: "Watch the clip as many times as you need. When you're ready, hit Start Shadowing."
+#### 5. Add route (App.tsx)
 
-**4. Transition from watch to practice**
+Add `<Route path="/session/:sessionId" element={<SessionDetail />} />` and import the new page.
 
-When the user clicks "Start Shadowing":
-- Destroy the watch player instance
-- Set phase to `"countdown"` (which triggers the 3-second countdown, then practice as before)
-- The practice phase creates a fresh player with auto-record behavior
+### Technical Notes
 
-### Technical Details
+- The page reads the session from `getSessions().find(s => s.id === sessionId)` and the clip from `getClip(session.clipId)`.
+- If session or clip is not found, show a "not found" message with a link back to the dashboard.
+- Existing sessions without a transcript field will simply show "No transcript available."
+- The `SessionDetailDialog` component file is kept but no longer used from the dashboard (can be cleaned up later).
 
-- The `initPlayer` callback needs a parameter or ref to know whether to auto-record. Simplest approach: add a `phaseRef` that tracks the current phase, and in `onReady`, check `phaseRef.current === "practice"` before calling `startRef` and `startListeningRef`.
-- Player cleanup between watch and practice: destroy the player when leaving the watch phase (in the "Start Shadowing" click handler or via an effect), so the practice phase can create a fresh one.
-- The watch phase player uses the same `id="shadow-player"` div, but the effect that initializes it will now fire for both `"watch"` and `"practice"` phases. The existing cleanup in the effect handles destroying the old player before creating a new one.
-- No changes to clipStore, hooks, or other pages.
