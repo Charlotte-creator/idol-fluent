@@ -111,6 +111,7 @@ const Retell = () => {
       vocabularyRichness: analysisResult.vocabularyRichness,
       elongationCount: analysisResult.elongationCount,
       timeLimitMinutes: timeLimit,
+      transcript: analysisResult.transcript,
     });
     navigate("/dashboard");
   };

@@ -22,6 +22,7 @@ export interface Session {
   vocabularyRichness: number;
   elongationCount: number;
   timeLimitMinutes?: number;
+  transcript?: string;
 }
 
 const CLIPS_KEY = "shadowspeak_clips";
