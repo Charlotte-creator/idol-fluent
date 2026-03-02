@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,8 @@ declare global {
 const Shadow = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const clip = id ? getClip(id) : undefined;
+  const clipRaw = id ? getClip(id) : undefined;
+  const clip = useMemo(() => clipRaw, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [phase, setPhase] = useState<"env-check" | "countdown" | "practice">("env-check");
   const [quietConfirmed, setQuietConfirmed] = useState(false);
