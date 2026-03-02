@@ -14,6 +14,7 @@ import {
   Headphones,
   VolumeX,
   CheckCircle2,
+  Info,
 } from "lucide-react";
 import { getClip, saveSession } from "@/lib/clipStore";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
@@ -148,9 +149,10 @@ const Shadow = () => {
     if (audioUrl && clip) {
       setRecordings((prev) => [...prev, audioUrl]);
       setRounds((prev) => prev + 1);
-      // Analyze and save shadow session
-      const result = stopAndAnalyzeRef.current(duration);
-      if (result) {
+      // Compute actual duration from recording (duration state may be stale)
+      const durationSeconds = duration;
+      const result = stopAndAnalyzeRef.current(durationSeconds);
+      if (result && durationSeconds >= 3) {
         saveSession({
           clipId: clip.id,
           type: "shadow",
@@ -158,7 +160,7 @@ const Shadow = () => {
           fillerWordCount: result.fillerWordCount,
           fillerWordsPerMinute: result.fillerWordsPerMinute,
           expressionsUsed: result.expressionsUsed,
-          durationSeconds: duration,
+          durationSeconds,
           totalWords: result.totalWords,
           pauseRatio: result.pauseRatio,
           vocabularyRichness: result.vocabularyRichness,
@@ -225,6 +227,13 @@ const Shadow = () => {
                 </div>
                 <p className="text-xs text-muted-foreground">Headphones prevent the video audio from being picked up by your mic.</p>
               </label>
+            </div>
+
+            <div className="flex items-start gap-2 rounded-md bg-muted/50 p-3">
+              <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+              <p className="text-xs text-muted-foreground">
+                Tip: You can use the YouTube player's settings gear icon to slow down the playback speed if the speaker is too fast.
+              </p>
             </div>
 
             <Button

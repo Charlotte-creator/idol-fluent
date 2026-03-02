@@ -59,13 +59,28 @@ const Dashboard = () => {
   }, [sessions]);
 
   const chartData = useMemo(() => {
-    return sessions
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-      .map((s) => ({
-        date: format(new Date(s.date), "MMM d"),
-        wpm: s.wordsPerMinute,
-        fillers: s.fillerWordsPerMinute,
-      }));
+    // Filter out outliers (e.g. race condition producing 1300 WPM)
+    const valid = sessions.filter((s) => s.wordsPerMinute <= 300);
+    const grouped: Record<string, { retellWpm: number[]; shadowWpm: number[]; retellFillers: number[]; shadowFillers: number[] }> = {};
+    for (const s of valid) {
+      const key = format(new Date(s.date), "MMM d");
+      if (!grouped[key]) grouped[key] = { retellWpm: [], shadowWpm: [], retellFillers: [], shadowFillers: [] };
+      if (s.type === "retell") {
+        grouped[key].retellWpm.push(s.wordsPerMinute);
+        grouped[key].retellFillers.push(s.fillerWordsPerMinute);
+      } else {
+        grouped[key].shadowWpm.push(s.wordsPerMinute);
+        grouped[key].shadowFillers.push(s.fillerWordsPerMinute);
+      }
+    }
+    const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : undefined;
+    return Object.entries(grouped).map(([date, g]) => ({
+      date,
+      retellWpm: avg(g.retellWpm),
+      shadowWpm: avg(g.shadowWpm),
+      retellFillers: avg(g.retellFillers),
+      shadowFillers: avg(g.shadowFillers),
+    }));
   }, [sessions]);
 
   if (sessions.length === 0) {
@@ -139,7 +154,8 @@ const Dashboard = () => {
             <CardContent>
               <ChartContainer
                 config={{
-                  wpm: { label: "WPM", color: "hsl(var(--primary))" },
+                  retellWpm: { label: "Retell WPM", color: "hsl(var(--primary))" },
+                  shadowWpm: { label: "Shadow WPM", color: "hsl(var(--muted-foreground))" },
                 }}
                 className="h-[200px]"
               >
@@ -148,7 +164,8 @@ const Dashboard = () => {
                   <XAxis dataKey="date" />
                   <YAxis />
                   <ChartTooltip content={<ChartTooltipContent />} />
-                  <Line type="monotone" dataKey="wpm" stroke="var(--color-wpm)" strokeWidth={2} dot />
+                  <Line type="monotone" dataKey="retellWpm" stroke="var(--color-retellWpm)" strokeWidth={2} dot connectNulls />
+                  <Line type="monotone" dataKey="shadowWpm" stroke="var(--color-shadowWpm)" strokeWidth={2} dot strokeDasharray="5 5" connectNulls />
                 </LineChart>
               </ChartContainer>
             </CardContent>
@@ -161,7 +178,8 @@ const Dashboard = () => {
             <CardContent>
               <ChartContainer
                 config={{
-                  fillers: { label: "Fillers/min", color: "hsl(var(--destructive))" },
+                  retellFillers: { label: "Retell Fillers/min", color: "hsl(var(--destructive))" },
+                  shadowFillers: { label: "Shadow Fillers/min", color: "hsl(var(--muted-foreground))" },
                 }}
                 className="h-[200px]"
               >
@@ -170,7 +188,8 @@ const Dashboard = () => {
                   <XAxis dataKey="date" />
                   <YAxis />
                   <ChartTooltip content={<ChartTooltipContent />} />
-                  <Line type="monotone" dataKey="fillers" stroke="var(--color-fillers)" strokeWidth={2} dot />
+                  <Line type="monotone" dataKey="retellFillers" stroke="var(--color-retellFillers)" strokeWidth={2} dot connectNulls />
+                  <Line type="monotone" dataKey="shadowFillers" stroke="var(--color-shadowFillers)" strokeWidth={2} dot strokeDasharray="5 5" connectNulls />
                 </LineChart>
               </ChartContainer>
             </CardContent>
