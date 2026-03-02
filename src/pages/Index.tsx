@@ -7,9 +7,9 @@ import { Button } from "@/components/ui/button";
 import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { Badge } from "@/components/ui/badge";
 
-const CLIP_START = 112;
-const CLIP_END = 210;
-const VIDEO_ID = "b-m2DntVdQU";
+const CLIP_START = 0;
+const CLIP_END = 89;
+const VIDEO_ID = "XFtnidLC60Q";
 
 const STEPS = [
   { icon: Eye, num: "1", title: "Watch & Listen", desc: "Play the clip with subtitles on. Just listen the first time." },
