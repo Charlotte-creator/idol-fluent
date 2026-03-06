@@ -1,6 +1,62 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useMemo } from "react";
 
-const FILLER_WORDS = ["um", "uh", "like", "you know", "so", "basically", "actually", "literally", "right"];
+import { computeTranscriptMetrics } from "@/lib/speechMetrics";
+
+const DEFAULT_LANGUAGE = "en-US";
+const LANGUAGE_KEY = "shadowspeak_speech_language";
+const ON_DEVICE_KEY = "shadowspeak_speech_on_device";
+const CONTEXT_PHRASES_KEY = "shadowspeak_context_phrases";
+const MAX_ALTERNATIVES = 3;
+
+type SpeechRecognitionAlternativeLike = {
+  transcript: string;
+  confidence?: number;
+};
+
+type SpeechRecognitionResultLike = {
+  isFinal: boolean;
+  length: number;
+  [index: number]: SpeechRecognitionAlternativeLike;
+};
+
+type SpeechRecognitionResultListLike = {
+  length: number;
+  [index: number]: SpeechRecognitionResultLike;
+};
+
+type SpeechRecognitionEventLike = {
+  resultIndex: number;
+  results: SpeechRecognitionResultListLike;
+};
+
+type SpeechRecognitionErrorLike = {
+  error: string;
+  message?: string;
+};
+
+type SpeechRecognitionInstance = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives?: number;
+  phrases?: unknown[];
+  processLocally?: boolean;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorLike) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort?: () => void;
+};
+
+type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
+
+interface ListeningSession {
+  transcriptParts: string[];
+  silenceGapsMs: number[];
+  lastResultTime: number;
+  stoppedByUser: boolean;
+}
 
 export interface AnalysisResult {
   transcript: string;
@@ -16,273 +72,336 @@ export interface AnalysisResult {
   elongationDetails: Record<string, number>;
 }
 
-const HESITATION_SOUNDS = ["hmm", "hm", "ah", "er", "oh", "mm", "uh huh"];
+function getRecognitionCtor(): SpeechRecognitionCtor | null {
+  const win = window as Window & {
+    SpeechRecognition?: SpeechRecognitionCtor;
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+  };
+  return win.SpeechRecognition || win.webkitSpeechRecognition || null;
+}
 
-function detectElongations(text: string): { count: number; details: Record<string, number> } {
-  const details: Record<string, number> = {};
-  let count = 0;
+function getDefaultLanguage(): string {
+  const langFromDocument = document.documentElement.lang?.trim();
+  if (langFromDocument) return langFromDocument;
+  if (navigator.language?.trim()) return navigator.language;
+  return DEFAULT_LANGUAGE;
+}
 
-  // 1. Repeated consecutive words (stuttering): "I I I", "the the"
-  const repeatedWordRegex = /\b(\w+)(\s+\1){1,}\b/gi;
-  let match;
-  while ((match = repeatedWordRegex.exec(text)) !== null) {
-    const label = match[0].toLowerCase();
-    details[label] = (details[label] || 0) + 1;
-    count++;
-  }
+function readStoredLanguage(): string {
+  const stored = localStorage.getItem(LANGUAGE_KEY)?.trim();
+  return stored || getDefaultLanguage();
+}
 
-  // 2. Hesitation sounds: "hmm", "ah", "er", etc.
-  for (const h of HESITATION_SOUNDS) {
-    const regex = new RegExp(`\\b${h}\\b`, "gi");
-    const matches = text.match(regex);
-    if (matches) {
-      details[h] = (details[h] || 0) + matches.length;
-      count += matches.length;
+function readStoredOnDevicePreference(): boolean {
+  return localStorage.getItem(ON_DEVICE_KEY) === "true";
+}
+
+function readStoredContextPhrases(): string[] {
+  const raw = localStorage.getItem(CONTEXT_PHRASES_KEY);
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function sanitizeContextPhrases(phrases: string[]): string[] {
+  return [...new Set(phrases.map((phrase) => phrase.trim()).filter(Boolean))].slice(0, 50);
+}
+
+function pickBestAlternative(result: SpeechRecognitionResultLike): string {
+  if (result.length <= 0) return "";
+
+  let bestTranscript = result[0].transcript?.trim() || "";
+  let bestConfidence = Number.isFinite(result[0].confidence ?? NaN)
+    ? (result[0].confidence as number)
+    : -1;
+
+  for (let i = 1; i < result.length; i++) {
+    const alt = result[i];
+    const confidence = Number.isFinite(alt.confidence ?? NaN) ? (alt.confidence as number) : -1;
+    if (confidence > bestConfidence) {
+      bestConfidence = confidence;
+      bestTranscript = alt.transcript?.trim() || bestTranscript;
     }
   }
 
-  // 3. Original repeated-character fallback (e.g., "soooo")
-  const charRepeatRegex = /\b\w*([a-z])\1{2,}\w*\b/gi;
-  while ((match = charRepeatRegex.exec(text)) !== null) {
-    const word = match[0].toLowerCase();
-    // Avoid double-counting if already caught by hesitation sounds
-    if (!HESITATION_SOUNDS.includes(word)) {
-      details[word] = (details[word] || 0) + 1;
-      count++;
-    }
-  }
+  return bestTranscript.trim();
+}
 
-  return { count, details };
+function mapRecognitionError(error: string, usingOnDevice: boolean): string | null {
+  switch (error) {
+    case "no-speech":
+      return "No speech detected. Speak clearly and try again.";
+    case "aborted":
+      return null;
+    case "audio-capture":
+      return "No microphone input detected. Check your mic connection and permissions.";
+    case "not-allowed":
+      return "Microphone permission was denied. Allow access and try again.";
+    case "language-not-supported":
+      return usingOnDevice
+        ? "On-device recognition is unavailable for this language. Disable on-device mode or install the language pack."
+        : "This language is not supported by your browser's speech recognition service.";
+    case "service-not-allowed":
+      return "Speech recognition service is blocked by your browser or system settings.";
+    case "network":
+      return "Speech recognition lost network connectivity. Try again.";
+    default:
+      return `Recognition error: ${error}`;
+  }
+}
+
+function shouldTreatAsFatal(error: string): boolean {
+  return [
+    "audio-capture",
+    "not-allowed",
+    "language-not-supported",
+    "service-not-allowed",
+    "network",
+  ].includes(error);
 }
 
 export function useSpeechAnalysis() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const recognitionRef = useRef<any>(null);
+  const [language, setLanguageState] = useState(readStoredLanguage);
+  const [preferOnDevice, setPreferOnDeviceState] = useState(readStoredOnDevicePreference);
+  const [contextPhrases, setContextPhrasesState] = useState<string[]>(readStoredContextPhrases);
 
-  const analyze = useCallback(
-    (durationSeconds: number, expressions: string[] = []): Promise<AnalysisResult> => {
-      return new Promise((resolve, reject) => {
-        const SpeechRecognition =
-          (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const sessionRef = useRef<ListeningSession | null>(null);
 
-        if (!SpeechRecognition) {
-          const msg = "Speech Recognition not supported in this browser. Try Chrome.";
-          setError(msg);
-          reject(new Error(msg));
-          return;
-        }
+  const support = useMemo(() => {
+    const ctor = getRecognitionCtor();
+    if (!ctor) {
+      return {
+        supported: false,
+        supportsContextualPhrases: false,
+        supportsOnDevice: false,
+      };
+    }
 
-        const recognition = new SpeechRecognition();
-        recognitionRef.current = recognition;
-        recognition.continuous = true;
-        recognition.interimResults = false;
-        recognition.lang = "en-US";
+    try {
+      const probe = new ctor();
+      return {
+        supported: true,
+        supportsContextualPhrases: "phrases" in probe,
+        supportsOnDevice: "processLocally" in probe,
+      };
+    } catch {
+      return {
+        supported: true,
+        supportsContextualPhrases: false,
+        supportsOnDevice: false,
+      };
+    }
+  }, []);
 
-        let fullTranscript = "";
-        const silenceGaps: number[] = [];
-        let lastResultTime = Date.now();
+  const stopRecognition = useCallback((abort = false) => {
+    const current = recognitionRef.current;
+    if (!current) return;
 
-        setIsAnalyzing(true);
-        setError(null);
+    try {
+      if (abort && current.abort) {
+        current.abort();
+      } else {
+        current.stop();
+      }
+    } catch {
+      // Avoid propagating browser-specific stop/abort exceptions.
+    } finally {
+      recognitionRef.current = null;
+    }
+  }, []);
 
-        recognition.onresult = (event: any) => {
-          const now = Date.now();
-          const gap = now - lastResultTime;
-          if (gap > 1500) silenceGaps.push(gap);
-          lastResultTime = now;
+  const setLanguage = useCallback((value: string) => {
+    const normalized = value.trim();
+    if (!normalized) return;
+    setLanguageState(normalized);
+    localStorage.setItem(LANGUAGE_KEY, normalized);
+  }, []);
 
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            if (event.results[i].isFinal) {
-              fullTranscript += " " + event.results[i][0].transcript;
-            }
-          }
-        };
+  const setPreferOnDevice = useCallback((value: boolean) => {
+    setPreferOnDeviceState(value);
+    localStorage.setItem(ON_DEVICE_KEY, String(value));
+  }, []);
 
-        recognition.onerror = (event: any) => {
-          if (event.error !== "no-speech") {
-            setError(`Recognition error: ${event.error}`);
-          }
-        };
-
-        recognition.onend = () => {
-          const text = fullTranscript.trim().toLowerCase();
-          const words = text.split(/\s+/).filter(Boolean);
-          const totalWords = words.length;
-          const durationMin = durationSeconds / 60;
-          const wpm = durationMin > 0 ? Math.round(totalWords / durationMin) : 0;
-
-          // Filler words
-          const fillerDetails: Record<string, number> = {};
-          let fillerCount = 0;
-          for (const filler of FILLER_WORDS) {
-            const regex = new RegExp(`\\b${filler}\\b`, "gi");
-            const matches = text.match(regex);
-            const count = matches ? matches.length : 0;
-            if (count > 0) fillerDetails[filler] = count;
-            fillerCount += count;
-          }
-          const fillerPerMin = durationMin > 0 ? Math.round((fillerCount / durationMin) * 10) / 10 : 0;
-
-          // Expressions matched
-          const expressionsUsed = expressions.filter((expr) =>
-            text.includes(expr.toLowerCase())
-          );
-
-          // Pause ratio
-          const totalSilence = silenceGaps.reduce((a, b) => a + b, 0);
-          const pauseRatio = durationSeconds > 0
-            ? Math.round((totalSilence / 1000 / durationSeconds) * 100) / 100
-            : 0;
-
-          // Vocabulary richness
-          const uniqueWords = new Set(words);
-          const vocabularyRichness = totalWords > 0
-            ? Math.round((uniqueWords.size / totalWords) * 100) / 100
-            : 0;
-
-          // Elongations
-          const elongations = detectElongations(text);
-
-          const analysisResult: AnalysisResult = {
-            transcript: fullTranscript.trim(),
-            totalWords,
-            wordsPerMinute: wpm,
-            fillerWordCount: fillerCount,
-            fillerWordsPerMinute: fillerPerMin,
-            fillerDetails,
-            expressionsUsed,
-            pauseRatio,
-            vocabularyRichness,
-            elongationCount: elongations.count,
-            elongationDetails: elongations.details,
-          };
-
-          setResult(analysisResult);
-          setIsAnalyzing(false);
-          resolve(analysisResult);
-        };
-
-        recognition.start();
-      });
-    },
-    []
-  );
-
-  const stopAnalysis = useCallback(() => {
-    recognitionRef.current?.stop();
+  const setContextPhrases = useCallback((phrases: string[]) => {
+    const sanitized = sanitizeContextPhrases(phrases);
+    setContextPhrasesState(sanitized);
+    localStorage.setItem(CONTEXT_PHRASES_KEY, sanitized.join(", "));
   }, []);
 
   const startListening = useCallback(() => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognition = getRecognitionCtor();
     if (!SpeechRecognition) {
-      setError("Speech Recognition not supported.");
+      setError("Speech recognition is not supported in this browser. Try Chrome.");
       return;
     }
+
+    if (recognitionRef.current) {
+      if (sessionRef.current) {
+        sessionRef.current.stoppedByUser = true;
+      }
+      stopRecognition(true);
+    }
+
     const recognition = new SpeechRecognition();
-    recognitionRef.current = recognition;
     recognition.continuous = true;
     recognition.interimResults = false;
-    recognition.lang = "en-US";
+    recognition.lang = language;
 
-    let fullTranscript = "";
-    const silenceGaps: number[] = [];
-    let lastResultTime = Date.now();
+    if ("maxAlternatives" in recognition) {
+      recognition.maxAlternatives = MAX_ALTERNATIVES;
+    }
+
+    let startupError: string | null = null;
+    if ("processLocally" in recognition) {
+      recognition.processLocally = preferOnDevice;
+    } else if (preferOnDevice) {
+      startupError = "On-device speech recognition is not supported in this browser.";
+    }
+
+    if ("phrases" in recognition) {
+      const phraseCtor = (window as Window & { SpeechRecognitionPhrase?: new (...args: unknown[]) => unknown })
+        .SpeechRecognitionPhrase;
+      const sanitized = sanitizeContextPhrases(contextPhrases);
+      const phraseEntries = sanitized.map((phrase) => {
+        if (!phraseCtor) return { phrase, boost: 5 };
+        try {
+          return new phraseCtor(phrase, 5);
+        } catch {
+          try {
+            return new phraseCtor({ phrase, boost: 5 });
+          } catch {
+            return { phrase, boost: 5 };
+          }
+        }
+      });
+      recognition.phrases = phraseEntries;
+    }
+
+    const session: ListeningSession = {
+      transcriptParts: [],
+      silenceGapsMs: [],
+      lastResultTime: Date.now(),
+      stoppedByUser: false,
+    };
+
+    sessionRef.current = session;
+    recognitionRef.current = recognition;
 
     setIsAnalyzing(true);
-    setError(null);
+    setError(startupError);
     setResult(null);
 
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event) => {
+      if (sessionRef.current !== session) return;
+
       const now = Date.now();
-      const gap = now - lastResultTime;
-      if (gap > 1500) silenceGaps.push(gap);
-      lastResultTime = now;
+      const gap = now - session.lastResultTime;
+      if (gap > 1500) session.silenceGapsMs.push(gap);
+      session.lastResultTime = now;
+
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          fullTranscript += " " + event.results[i][0].transcript;
-        }
+        const resultItem = event.results[i];
+        if (!resultItem?.isFinal) continue;
+        const best = pickBestAlternative(resultItem);
+        if (best) session.transcriptParts.push(best);
       }
     };
 
-    recognition.onerror = (event: any) => {
-      if (event.error !== "no-speech") {
-        setError(`Recognition error: ${event.error}`);
+    recognition.onerror = (event) => {
+      if (sessionRef.current !== session) return;
+      const message = mapRecognitionError(event.error, preferOnDevice);
+
+      if (event.error === "aborted" && session.stoppedByUser) {
+        return;
+      }
+
+      if (message) {
+        setError(message);
+      }
+
+      if (shouldTreatAsFatal(event.error)) {
+        setIsAnalyzing(false);
       }
     };
 
-    // Store transcript builder on ref for later retrieval
-    (recognition as any)._transcript = () => fullTranscript;
-    (recognition as any)._silenceGaps = () => silenceGaps;
+    recognition.onend = () => {
+      if (recognitionRef.current === recognition) {
+        recognitionRef.current = null;
+      }
+      if (sessionRef.current !== session) return;
+      setIsAnalyzing(false);
+    };
 
-    recognition.start();
-  }, []);
+    try {
+      recognition.start();
+    } catch {
+      setIsAnalyzing(false);
+      setError("Unable to start speech recognition. Please try again.");
+      recognitionRef.current = null;
+    }
+  }, [contextPhrases, language, preferOnDevice, stopRecognition]);
 
   const stopAndAnalyze = useCallback(
     (durationSeconds: number, expressions: string[] = []): AnalysisResult | null => {
-      const recognition = recognitionRef.current;
-      if (!recognition) return null;
-
-      const text = ((recognition as any)._transcript?.() || "").trim().toLowerCase();
-      const silenceGaps: number[] = (recognition as any)._silenceGaps?.() || [];
-
-      recognition.stop();
-
-      const words = text.split(/\s+/).filter(Boolean);
-      const totalWords = words.length;
-      const durationMin = durationSeconds / 60;
-      const wpm = durationMin > 0 ? Math.round(totalWords / durationMin) : 0;
-
-      const fillerDetails: Record<string, number> = {};
-      let fillerCount = 0;
-      for (const filler of FILLER_WORDS) {
-        const regex = new RegExp(`\\b${filler}\\b`, "gi");
-        const matches = text.match(regex);
-        const count = matches ? matches.length : 0;
-        if (count > 0) fillerDetails[filler] = count;
-        fillerCount += count;
+      const session = sessionRef.current;
+      if (!session) {
+        setIsAnalyzing(false);
+        return null;
       }
-      const fillerPerMin = durationMin > 0 ? Math.round((fillerCount / durationMin) * 10) / 10 : 0;
 
-      const expressionsUsed = expressions.filter((expr) =>
-        text.includes(expr.toLowerCase())
+      session.stoppedByUser = true;
+      stopRecognition(false);
+
+      const transcript = session.transcriptParts.join(" ").replace(/\s+/g, " ").trim();
+      const metrics = computeTranscriptMetrics(
+        transcript,
+        durationSeconds,
+        expressions,
+        session.silenceGapsMs,
       );
 
-      const totalSilence = silenceGaps.reduce((a, b) => a + b, 0);
-      const pauseRatio = durationSeconds > 0
-        ? Math.round((totalSilence / 1000 / durationSeconds) * 100) / 100
-        : 0;
-
-      const uniqueWords = new Set(words);
-      const vocabularyRichness = totalWords > 0
-        ? Math.round((uniqueWords.size / totalWords) * 100) / 100
-        : 0;
-
-      // Elongations
-      const elongations = detectElongations(text);
-
       const analysisResult: AnalysisResult = {
-        transcript: text,
-        totalWords,
-        wordsPerMinute: wpm,
-        fillerWordCount: fillerCount,
-        fillerWordsPerMinute: fillerPerMin,
-        fillerDetails,
-        expressionsUsed,
-        pauseRatio,
-        vocabularyRichness,
-        elongationCount: elongations.count,
-        elongationDetails: elongations.details,
+        transcript,
+        ...metrics,
       };
 
       setResult(analysisResult);
       setIsAnalyzing(false);
+      sessionRef.current = null;
       return analysisResult;
     },
-    []
+    [stopRecognition],
   );
 
-  return { isAnalyzing, result, error, analyze, stopAnalysis, startListening, stopAndAnalyze };
+  const stopAnalysis = useCallback(() => {
+    if (sessionRef.current) {
+      sessionRef.current.stoppedByUser = true;
+    }
+    stopRecognition(false);
+    setIsAnalyzing(false);
+  }, [stopRecognition]);
+
+  return {
+    isAnalyzing,
+    result,
+    error,
+    startListening,
+    stopAndAnalyze,
+    stopAnalysis,
+    language,
+    setLanguage,
+    preferOnDevice,
+    setPreferOnDevice,
+    contextPhrases,
+    setContextPhrases,
+    supportsSpeechRecognition: support.supported,
+    supportsContextualPhrases: support.supportsContextualPhrases,
+    supportsOnDevice: support.supportsOnDevice,
+  };
 }

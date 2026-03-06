@@ -25,6 +25,7 @@ import {
 import { getClip, saveSession, getSessionsForClip } from "@/lib/clipStore";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { useSpeechAnalysis, type AnalysisResult } from "@/hooks/useSpeechAnalysis";
+import { SpeechRecognitionSettings } from "@/components/SpeechRecognitionSettings";
 
 const TIME_OPTIONS = [2, 3, 4, 5];
 
@@ -41,7 +42,19 @@ const Retell = () => {
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { isRecording, audioUrl, duration, error, start, stop } = useAudioRecorder();
-  const { startListening, stopAndAnalyze, error: speechError } = useSpeechAnalysis();
+  const {
+    startListening,
+    stopAndAnalyze,
+    error: speechError,
+    language,
+    setLanguage,
+    preferOnDevice,
+    setPreferOnDevice,
+    contextPhrases,
+    setContextPhrases,
+    supportsOnDevice,
+    supportsContextualPhrases,
+  } = useSpeechAnalysis();
 
   // Get latest shadow session for comparison
   const latestShadow = useMemo(() => {
@@ -81,13 +94,13 @@ const Retell = () => {
   // When recording stops, analyze
   useEffect(() => {
     if (phase === "recording" && !isRecording && duration > 0) {
-      const result = stopAndAnalyze(duration);
+      const result = stopAndAnalyze(duration, contextPhrases);
       if (result) {
         setAnalysisResult(result);
       }
       setPhase("results");
     }
-  }, [isRecording, phase, duration, stopAndAnalyze]);
+  }, [contextPhrases, duration, isRecording, phase, stopAndAnalyze]);
 
   // Cleanup timer
   useEffect(() => {
@@ -201,6 +214,17 @@ const Retell = () => {
             </div>
           </CardContent>
         </Card>
+
+        <SpeechRecognitionSettings
+          language={language}
+          onLanguageChange={setLanguage}
+          preferOnDevice={preferOnDevice}
+          onPreferOnDeviceChange={setPreferOnDevice}
+          supportsOnDevice={supportsOnDevice}
+          contextPhrases={contextPhrases}
+          onContextPhrasesChange={setContextPhrases}
+          supportsContextualPhrases={supportsContextualPhrases}
+        />
 
         <Button size="lg" className="w-full" onClick={handleStart}>
           <Mic className="mr-1 h-4 w-4" /> Start Retelling ({timeLimit} min)

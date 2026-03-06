@@ -19,6 +19,7 @@ import {
 import { getClip, saveSession } from "@/lib/clipStore";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { useSpeechAnalysis } from "@/hooks/useSpeechAnalysis";
+import { SpeechRecognitionSettings } from "@/components/SpeechRecognitionSettings";
 
 declare global {
   interface Window {
@@ -48,7 +49,19 @@ const Shadow = () => {
   const stopRef = useRef<() => void>(() => {});
 
   const { isRecording, audioUrl, duration, error, start, stop } = useAudioRecorder();
-  const { startListening, stopAndAnalyze } = useSpeechAnalysis();
+  const {
+    startListening,
+    stopAndAnalyze,
+    error: speechError,
+    language,
+    setLanguage,
+    preferOnDevice,
+    setPreferOnDevice,
+    contextPhrases,
+    setContextPhrases,
+    supportsOnDevice,
+    supportsContextualPhrases,
+  } = useSpeechAnalysis();
 
   // Keep refs in sync
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
@@ -155,7 +168,7 @@ const Shadow = () => {
       setRounds((prev) => prev + 1);
       // Compute actual duration from recording (duration state may be stale)
       const durationSeconds = duration;
-      const result = stopAndAnalyzeRef.current(durationSeconds);
+      const result = stopAndAnalyzeRef.current(durationSeconds, contextPhrases);
       if (result && durationSeconds >= 3) {
         saveSession({
           clipId: clip.id,
@@ -173,7 +186,7 @@ const Shadow = () => {
         });
       }
     }
-  }, [audioUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [audioUrl, contextPhrases]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!clip) {
     return (
@@ -253,6 +266,17 @@ const Shadow = () => {
             </Button>
           </CardContent>
         </Card>
+
+        <SpeechRecognitionSettings
+          language={language}
+          onLanguageChange={setLanguage}
+          preferOnDevice={preferOnDevice}
+          onPreferOnDeviceChange={setPreferOnDevice}
+          supportsOnDevice={supportsOnDevice}
+          contextPhrases={contextPhrases}
+          onContextPhrasesChange={setContextPhrases}
+          supportsContextualPhrases={supportsContextualPhrases}
+        />
       </div>
     );
   }
@@ -386,6 +410,7 @@ const Shadow = () => {
             </Button>
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
+          {speechError && <p className="text-sm text-destructive">{speechError}</p>}
         </CardContent>
       </Card>
 
