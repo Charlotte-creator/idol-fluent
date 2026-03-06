@@ -15,9 +15,9 @@ function escapeRegex(value: string): string {
 
 function tokenize(text: string): Token[] {
   const tokens = text.toLowerCase().match(/[a-z]+(?:'[a-z]+)?|[.,!?;:]/g) ?? [];
-  return tokens.map((value) => ({
+  return tokens.map((value): Token => ({
     value,
-    kind: /[.,!?;:]/.test(value) ? "punct" : "word",
+    kind: /[.,!?;:]/.test(value) ? "punct" as const : "word" as const,
   }));
 }
 
