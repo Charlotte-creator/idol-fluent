@@ -1,73 +1,63 @@
-# Welcome to your Lovable project
+# Idol Fluent
 
-## Project info
+Idol Fluent is a speaking-practice app for shadowing and retelling short YouTube clips.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+It helps learners track:
+- words per minute
+- filler words and filler rate
+- hesitation/elongation patterns
+- pause ratio
+- vocabulary richness
 
-## How can I edit this code?
+All clip and session data is stored locally in the browser (`localStorage`).
 
-There are several ways of editing your application.
+## Tech Stack
 
-**Use Lovable**
+- Vite
+- React 18 + TypeScript
+- Tailwind CSS
+- shadcn/ui
+- Vitest + Testing Library
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## Quickstart
 
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+```bash
+npm install
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+Open `http://localhost:5173`.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## Available Scripts
 
-**Use GitHub Codespaces**
+```bash
+npm run dev        # start dev server
+npm run build      # production build
+npm run preview    # preview production build
+npm run test       # run unit tests
+npm run lint       # run eslint
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Browser Requirements
 
-## What technologies are used for this project?
+Speech analysis depends on the Web Speech API (`SpeechRecognition` / `webkitSpeechRecognition`):
 
-This project is built with:
+- Recommended: latest Chrome or Edge desktop
+- Firefox/Safari support is limited or unavailable for this API
+- Microphone permission must be granted
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+On-device recognition and contextual phrase biasing are experimental browser features and may not be available in all environments.
 
-## How can I deploy this project?
+## Limitations
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+- Speech metrics are heuristic and may vary by accent, background noise, and mic quality.
+- Transcript punctuation comes from browser recognition output and can affect filler classification.
+- YouTube embedding requires network access and playable video IDs.
+- Data is local to the current browser profile; no cloud sync is included.
 
-## Can I connect a custom domain to my Lovable project?
+## Project Structure
 
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+- `src/pages`: application screens (`Shadow`, `Retell`, `Dashboard`, etc.)
+- `src/hooks`: recording and speech-analysis hooks
+- `src/lib`: local storage and transcript metric utilities
+- `src/components`: UI and reusable view components
