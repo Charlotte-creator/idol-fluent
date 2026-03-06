@@ -1,3 +1,5 @@
+import type { TranscriptionSegment } from "@/lib/transcription";
+
 const ALWAYS_FILLERS = ["um", "uh", "you know", "basically", "actually", "literally"] as const;
 const CONTEXTUAL_FILLERS = new Set(["like", "so", "right"]);
 const HESITATION_SOUNDS = ["hmm", "hm", "ah", "er", "oh", "mm", "uh huh"] as const;
@@ -106,11 +108,52 @@ export interface TranscriptMetrics {
   elongationDetails: Record<string, number>;
 }
 
+export type AnalysisResult = TranscriptMetrics & {
+  transcript: string;
+};
+
+type PauseInput = {
+  silenceGapsMs?: number[];
+  segments?: TranscriptionSegment[];
+};
+
+function calculateSilenceFromSegments(
+  durationSeconds: number,
+  segments: TranscriptionSegment[] | undefined,
+): number | null {
+  if (!segments || segments.length === 0 || durationSeconds <= 0) return null;
+
+  const MIN_PAUSE_SECONDS = 0.2;
+  const ordered = segments
+    .filter((segment) => Number.isFinite(segment.start) && Number.isFinite(segment.end) && segment.end >= segment.start)
+    .sort((a, b) => a.start - b.start);
+
+  if (ordered.length === 0) return null;
+
+  let totalSilenceMs = 0;
+  let previousEnd = 0;
+
+  for (const segment of ordered) {
+    const gapSeconds = Math.max(0, segment.start - previousEnd);
+    if (gapSeconds >= MIN_PAUSE_SECONDS) {
+      totalSilenceMs += gapSeconds * 1000;
+    }
+    previousEnd = Math.max(previousEnd, segment.end);
+  }
+
+  const trailingGapSeconds = Math.max(0, durationSeconds - previousEnd);
+  if (trailingGapSeconds >= MIN_PAUSE_SECONDS) {
+    totalSilenceMs += trailingGapSeconds * 1000;
+  }
+
+  return totalSilenceMs;
+}
+
 export function computeTranscriptMetrics(
   transcript: string,
   durationSeconds: number,
   expressions: string[] = [],
-  silenceGapsMs: number[] = [],
+  pauseInput: PauseInput = {},
 ): TranscriptMetrics {
   const normalized = transcript.trim().toLowerCase();
   const words = normalized.split(/\s+/).filter(Boolean);
@@ -126,7 +169,9 @@ export function computeTranscriptMetrics(
     normalized.includes(expr.toLowerCase()),
   );
 
-  const totalSilence = silenceGapsMs.reduce((sum, gap) => sum + gap, 0);
+  const silenceFromSegments = calculateSilenceFromSegments(durationSeconds, pauseInput.segments);
+  const totalSilence =
+    silenceFromSegments ?? (pauseInput.silenceGapsMs || []).reduce((sum, gap) => sum + gap, 0);
   const pauseRatio =
     durationSeconds > 0 ? Math.round((totalSilence / 1000 / durationSeconds) * 100) / 100 : 0;
 

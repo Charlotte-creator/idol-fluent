@@ -28,7 +28,7 @@ export function useAudioRecorder() {
     }
   }, []);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (): Promise<boolean> => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -64,8 +64,10 @@ export function useAudioRecorder() {
       timerRef.current = setInterval(() => {
         setDuration(Math.floor((Date.now() - startTimeRef.current) / 1000));
       }, 500);
+      return true;
     } catch {
       setError("Microphone access denied. Please allow microphone access.");
+      return false;
     }
   }, [clearTimer, revokeAudioUrl]);
 
