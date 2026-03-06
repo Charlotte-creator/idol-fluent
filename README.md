@@ -35,6 +35,7 @@ Set `.env`:
 OPENAI_API_KEY=your_openai_api_key
 TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
 PORT=8787
+VITE_DEBUG=0
 ```
 
 Supported `TRANSCRIBE_MODEL` values:
@@ -56,8 +57,15 @@ npm run build:server # compile backend TypeScript
 npm run start        # run built API server (serves dist/ when available)
 npm run preview    # preview production build
 npm run test       # run unit tests
+npx playwright install chromium # one-time browser install for e2e
+npm run test:e2e   # run deterministic e2e tests
+npm run test:e2e:ui # run e2e tests in Playwright UI mode
+npm run eval:stt   # run transcription eval harness (WER/CER + latency)
 npm run lint       # run eslint
 ```
+
+Dev-only debug route:
+- Set `VITE_DEBUG=1` and open `/debug/transcribe` to upload audio, inspect raw response JSON, and compute WER/CER against a pasted reference transcript.
 
 ## Browser Requirements
 
@@ -79,3 +87,5 @@ Recording requires:
 - `src/lib`: local storage, transcript parsing, and metric utilities
 - `src/components`: UI and reusable view components
 - `server/src`: Express API (`POST /api/transcribe`)
+- `tests/e2e`: Playwright deterministic end-to-end tests
+- `eval`: transcription evaluation assets and references

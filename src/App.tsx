@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -10,6 +11,11 @@ import Retell from "./pages/Retell";
 import SessionDetail from "./pages/SessionDetail";
 import Dashboard from "./pages/Dashboard";
 import NotFound from "./pages/NotFound";
+
+const isDebugRouteEnabled = import.meta.env.VITE_DEBUG === "1";
+const DebugTranscribe = isDebugRouteEnabled
+  ? lazy(() => import("./pages/DebugTranscribe"))
+  : null;
 
 const App = () => (
   <TooltipProvider>
@@ -24,6 +30,16 @@ const App = () => (
         <Route path="/clip/:id/retell" element={<Retell />} />
         <Route path="/session/:sessionId" element={<SessionDetail />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        {isDebugRouteEnabled && DebugTranscribe && (
+          <Route
+            path="/debug/transcribe"
+            element={(
+              <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Loading debug tools...</div>}>
+                <DebugTranscribe />
+              </Suspense>
+            )}
+          />
+        )}
         <Route path="*" element={<NotFound />} />
       </Routes>
     </BrowserRouter>

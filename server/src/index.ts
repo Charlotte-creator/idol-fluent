@@ -202,6 +202,7 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.post("/api/transcribe", applyRateLimit, upload.single("audio"), async (req, res) => {
+  const requestStartedAt = Date.now();
   if (!openai) {
     res.status(500).json({
       error: "Missing OPENAI_API_KEY. Set it in your environment before transcribing.",
@@ -249,7 +250,10 @@ app.post("/api/transcribe", applyRateLimit, upload.single("audio"), async (req, 
       requestBody.timestamp_granularities = ["segment"];
     }
 
+    const openAiStartedAt = Date.now();
     const response = await openai.audio.transcriptions.create(requestBody as any);
+    const openAiDurationMs = Date.now() - openAiStartedAt;
+    const totalDurationMs = Date.now() - requestStartedAt;
     const parsed = parseTranscriptionResult(response);
     if (!parsed.text) {
       res.status(502).json({
@@ -258,6 +262,11 @@ app.post("/api/transcribe", applyRateLimit, upload.single("audio"), async (req, 
       return;
     }
 
+    res.setHeader("x-transcribe-model", TRANSCRIBE_MODEL);
+    res.setHeader(
+      "server-timing",
+      `openai;dur=${openAiDurationMs}, total;dur=${totalDurationMs}`,
+    );
     res.json(parsed);
   } catch (error: unknown) {
     const message =
