@@ -89,6 +89,14 @@ const Dashboard = () => {
       });
   }, [sessions]);
 
+  const sortedSessions = useMemo(
+    () =>
+      [...sessions].sort(
+        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+      ),
+    [sessions],
+  );
+
   if (sessions.length === 0) {
     return (
       <div className="mx-auto max-w-4xl px-4 py-12 text-center">
@@ -221,7 +229,7 @@ const Dashboard = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {[...sessions].reverse().map((s) => (
+              {sortedSessions.map((s) => (
                 <TableRow
                   key={s.id}
                   className="cursor-pointer hover:bg-muted/50"
