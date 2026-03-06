@@ -40,7 +40,7 @@ function parseSegments(raw: unknown): TranscriptionSegment[] | undefined {
         confidence: toNumber(segment.confidence),
       };
     })
-    .filter((segment): segment is TranscriptionSegment => segment !== null)
+    .filter((segment): segment is NonNullable<typeof segment> => segment !== null)
     .sort((a, b) => a.start - b.start);
 
   return parsed.length > 0 ? parsed : undefined;
