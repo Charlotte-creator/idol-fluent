@@ -19,7 +19,7 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid } from "recharts";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -45,7 +45,7 @@ const Dashboard = () => {
     const dates = [...new Set(sessions.map((s) => format(new Date(s.date), "yyyy-MM-dd")))].sort().reverse();
     let streak = 0;
     const today = format(new Date(), "yyyy-MM-dd");
-    let checkDate = new Date();
+    const checkDate = new Date();
     for (const d of dates) {
       const expected = format(checkDate, "yyyy-MM-dd");
       if (d === expected) {
@@ -64,7 +64,7 @@ const Dashboard = () => {
     const valid = sessions.filter((s) => s.wordsPerMinute <= 300);
     const grouped: Record<string, { retellWpm: number[]; shadowWpm: number[]; retellFillers: number[]; shadowFillers: number[] }> = {};
     for (const s of valid) {
-      const key = format(new Date(s.date), "MMM d");
+      const key = format(new Date(s.date), "yyyy-MM-dd");
       if (!grouped[key]) grouped[key] = { retellWpm: [], shadowWpm: [], retellFillers: [], shadowFillers: [] };
       if (s.type === "retell") {
         grouped[key].retellWpm.push(s.wordsPerMinute);
@@ -75,13 +75,18 @@ const Dashboard = () => {
       }
     }
     const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : undefined;
-    return Object.entries(grouped).map(([date, g]) => ({
-      date,
-      retellWpm: avg(g.retellWpm),
-      shadowWpm: avg(g.shadowWpm),
-      retellFillers: avg(g.retellFillers),
-      shadowFillers: avg(g.shadowFillers),
-    }));
+    return Object.keys(grouped)
+      .sort((a, b) => a.localeCompare(b))
+      .map((isoDate) => {
+        const g = grouped[isoDate];
+        return {
+          date: format(parseISO(isoDate), "MMM d"),
+          retellWpm: avg(g.retellWpm),
+          shadowWpm: avg(g.shadowWpm),
+          retellFillers: avg(g.retellFillers),
+          shadowFillers: avg(g.shadowFillers),
+        };
+      });
   }, [sessions]);
 
   if (sessions.length === 0) {
