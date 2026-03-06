@@ -21,11 +21,12 @@ import {
   Repeat,
   Volume2,
   Lightbulb,
+  Loader2,
 } from "lucide-react";
 import { getClip, saveSession, getSessionsForClip } from "@/lib/clipStore";
-import { useAudioRecorder } from "@/hooks/useAudioRecorder";
-import { useSpeechAnalysis, type AnalysisResult } from "@/hooks/useSpeechAnalysis";
+import { useTranscription } from "@/hooks/useTranscription";
 import { SpeechRecognitionSettings } from "@/components/SpeechRecognitionSettings";
+import { computeTranscriptMetrics, type AnalysisResult } from "@/lib/speechMetrics";
 
 const TIME_OPTIONS = [2, 3, 4, 5];
 
@@ -35,26 +36,25 @@ const Retell = () => {
   const clip = id ? getClip(id) : undefined;
 
   const [timeLimit, setTimeLimit] = useState(3);
-  const [phase, setPhase] = useState<"setup" | "recording" | "results">("setup");
+  const [phase, setPhase] = useState<"setup" | "recording" | "analyzing" | "results">("setup");
   const [remaining, setRemaining] = useState(0);
   const [warning, setWarning] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const { isRecording, audioUrl, duration, error, start, stop } = useAudioRecorder();
+  const isFinalizingRef = useRef(false);
   const {
-    startListening,
-    stopAndAnalyze,
-    error: speechError,
+    isRecording,
+    audioUrl,
+    duration,
+    error: transcriptionError,
+    isTranscribing,
     language,
     setLanguage,
-    preferOnDevice,
-    setPreferOnDevice,
-    contextPhrases,
-    setContextPhrases,
-    supportsOnDevice,
-    supportsContextualPhrases,
-  } = useSpeechAnalysis();
+    startRecording,
+    stopRecording,
+    stopAndTranscribe,
+  } = useTranscription();
 
   // Get latest shadow session for comparison
   const latestShadow = useMemo(() => {
@@ -65,42 +65,63 @@ const Retell = () => {
       : null;
   }, [clip]);
   const handleStart = useCallback(async () => {
-    setPhase("recording");
     setRemaining(timeLimit * 60);
     setWarning(false);
-    startListening();
-    await start();
+    const started = await startRecording();
+    if (!started) return;
+    isFinalizingRef.current = false;
+    setAnalysisResult(null);
+    setPhase("recording");
 
     timerRef.current = setInterval(() => {
       setRemaining((prev) => {
         const next = prev - 1;
         if (next <= 30 && next > 0) setWarning(true);
         if (next <= 0) {
-          // Auto-stop
-          stop();
+          stopRecording();
           if (timerRef.current) clearInterval(timerRef.current);
           return 0;
         }
         return next;
       });
     }, 1000);
-  }, [timeLimit, start, stop, startListening]);
+  }, [timeLimit, startRecording, stopRecording]);
 
   const handleStop = useCallback(() => {
-    stop();
+    stopRecording();
     if (timerRef.current) clearInterval(timerRef.current);
-  }, [stop]);
+  }, [stopRecording]);
 
   // When recording stops, analyze
   useEffect(() => {
-    if (phase === "recording" && !isRecording && duration > 0) {
-      const result = stopAndAnalyze(duration, contextPhrases);
-      if (result) {
-        setAnalysisResult(result);
+    if (phase !== "recording" || isRecording || duration <= 0 || isFinalizingRef.current) return;
+
+    isFinalizingRef.current = true;
+    setPhase("analyzing");
+
+    void (async () => {
+      const transcription = await stopAndTranscribe({
+        language,
+        durationSeconds: duration,
+      });
+
+      if (transcription) {
+        const metrics = computeTranscriptMetrics(
+          transcription.text,
+          transcription.duration ?? duration,
+          [],
+          { segments: transcription.segments },
+        );
+        setAnalysisResult({
+          transcript: transcription.text,
+          ...metrics,
+        });
       }
+
       setPhase("results");
-    }
-  }, [contextPhrases, duration, isRecording, phase, stopAndAnalyze]);
+      isFinalizingRef.current = false;
+    })();
+  }, [duration, isRecording, language, phase, stopAndTranscribe]);
 
   // Cleanup timer
   useEffect(() => {
@@ -215,16 +236,7 @@ const Retell = () => {
           </CardContent>
         </Card>
 
-        <SpeechRecognitionSettings
-          language={language}
-          onLanguageChange={setLanguage}
-          preferOnDevice={preferOnDevice}
-          onPreferOnDeviceChange={setPreferOnDevice}
-          supportsOnDevice={supportsOnDevice}
-          contextPhrases={contextPhrases}
-          onContextPhrasesChange={setContextPhrases}
-          supportsContextualPhrases={supportsContextualPhrases}
-        />
+        <SpeechRecognitionSettings language={language} onLanguageChange={setLanguage} />
 
         <Button size="lg" className="w-full" onClick={handleStart}>
           <Mic className="mr-1 h-4 w-4" /> Start Retelling ({timeLimit} min)
@@ -273,8 +285,26 @@ const Retell = () => {
           <MicOff className="mr-1 h-4 w-4" /> Stop Recording
         </Button>
 
-        {error && <p className="text-sm text-destructive text-center">{error}</p>}
-        {speechError && <p className="text-sm text-destructive text-center">{speechError}</p>}
+        {transcriptionError && <p className="text-sm text-destructive text-center">{transcriptionError}</p>}
+      </div>
+    );
+  }
+
+  if (phase === "analyzing") {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-8 space-y-6">
+        <Card className="text-center">
+          <CardContent className="py-10">
+            <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
+            <h2 className="mt-4 text-xl font-semibold text-foreground">Transcribing your audio...</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              This usually takes a few seconds.
+            </p>
+            {isTranscribing && (
+              <p className="mt-2 text-xs text-muted-foreground">Uploading and processing</p>
+            )}
+          </CardContent>
+        </Card>
       </div>
     );
   }

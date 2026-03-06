@@ -17,9 +17,9 @@ import {
   Info,
 } from "lucide-react";
 import { getClip, saveSession } from "@/lib/clipStore";
-import { useAudioRecorder } from "@/hooks/useAudioRecorder";
-import { useSpeechAnalysis } from "@/hooks/useSpeechAnalysis";
+import { useTranscription } from "@/hooks/useTranscription";
 import { SpeechRecognitionSettings } from "@/components/SpeechRecognitionSettings";
+import { computeTranscriptMetrics } from "@/lib/speechMetrics";
 
 declare global {
   interface Window {
@@ -48,32 +48,30 @@ const Shadow = () => {
   const isRecordingRef = useRef(false);
   const stopRef = useRef<() => void>(() => {});
 
-  const { isRecording, audioUrl, duration, error, start, stop } = useAudioRecorder();
   const {
-    startListening,
-    stopAndAnalyze,
-    error: speechError,
+    isRecording,
+    audioUrl,
+    duration,
+    error: transcriptionError,
+    isTranscribing,
     language,
     setLanguage,
-    preferOnDevice,
-    setPreferOnDevice,
-    contextPhrases,
-    setContextPhrases,
-    supportsOnDevice,
-    supportsContextualPhrases,
-  } = useSpeechAnalysis();
+    startRecording,
+    stopRecording,
+    stopAndTranscribe,
+  } = useTranscription();
 
   // Keep refs in sync
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
-  useEffect(() => { stopRef.current = stop; }, [stop]);
+  useEffect(() => { stopRef.current = stopRecording; }, [stopRecording]);
 
-  const startListeningRef = useRef(startListening);
-  useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
-  const stopAndAnalyzeRef = useRef(stopAndAnalyze);
-  useEffect(() => { stopAndAnalyzeRef.current = stopAndAnalyze; }, [stopAndAnalyze]);
+  const stopAndTranscribeRef = useRef(stopAndTranscribe);
+  useEffect(() => { stopAndTranscribeRef.current = stopAndTranscribe; }, [stopAndTranscribe]);
+  const languageRef = useRef(language);
+  useEffect(() => { languageRef.current = language; }, [language]);
 
-  const startRef = useRef(start);
-  useEffect(() => { startRef.current = start; }, [start]);
+  const startRef = useRef(startRecording);
+  useEffect(() => { startRef.current = startRecording; }, [startRecording]);
 
   const initPlayer = useCallback(() => {
     if (!clip || !window.YT?.Player) return;
@@ -100,7 +98,6 @@ const Shadow = () => {
           // Only auto-record in practice phase
           if (phaseRef.current === "practice") {
             startRef.current();
-            startListeningRef.current();
           }
         },
         onStateChange: (event: any) => {
@@ -168,25 +165,36 @@ const Shadow = () => {
       setRounds((prev) => prev + 1);
       // Compute actual duration from recording (duration state may be stale)
       const durationSeconds = duration;
-      const result = stopAndAnalyzeRef.current(durationSeconds, contextPhrases);
-      if (result && durationSeconds >= 3) {
+      void (async () => {
+        const transcription = await stopAndTranscribeRef.current({
+          language: languageRef.current,
+          durationSeconds,
+        });
+        if (!transcription || durationSeconds < 3) return;
+
+        const metrics = computeTranscriptMetrics(
+          transcription.text,
+          transcription.duration ?? durationSeconds,
+          [],
+          { segments: transcription.segments },
+        );
         saveSession({
           clipId: clip.id,
           type: "shadow",
-          wordsPerMinute: result.wordsPerMinute,
-          fillerWordCount: result.fillerWordCount,
-          fillerWordsPerMinute: result.fillerWordsPerMinute,
-          expressionsUsed: result.expressionsUsed,
+          wordsPerMinute: metrics.wordsPerMinute,
+          fillerWordCount: metrics.fillerWordCount,
+          fillerWordsPerMinute: metrics.fillerWordsPerMinute,
+          expressionsUsed: metrics.expressionsUsed,
           durationSeconds,
-          totalWords: result.totalWords,
-          pauseRatio: result.pauseRatio,
-          vocabularyRichness: result.vocabularyRichness,
-          elongationCount: result.elongationCount,
-          transcript: result.transcript,
+          totalWords: metrics.totalWords,
+          pauseRatio: metrics.pauseRatio,
+          vocabularyRichness: metrics.vocabularyRichness,
+          elongationCount: metrics.elongationCount,
+          transcript: transcription.text,
         });
-      }
+      })();
     }
-  }, [audioUrl, contextPhrases]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [audioUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!clip) {
     return (
@@ -267,16 +275,7 @@ const Shadow = () => {
           </CardContent>
         </Card>
 
-        <SpeechRecognitionSettings
-          language={language}
-          onLanguageChange={setLanguage}
-          preferOnDevice={preferOnDevice}
-          onPreferOnDeviceChange={setPreferOnDevice}
-          supportsOnDevice={supportsOnDevice}
-          contextPhrases={contextPhrases}
-          onContextPhrasesChange={setContextPhrases}
-          supportsContextualPhrases={supportsContextualPhrases}
-        />
+        <SpeechRecognitionSettings language={language} onLanguageChange={setLanguage} />
       </div>
     );
   }
@@ -396,7 +395,7 @@ const Shadow = () => {
             </div>
             <Button
               variant={isRecording ? "destructive" : "default"}
-              onClick={isRecording ? stop : start}
+              onClick={isRecording ? stopRecording : startRecording}
             >
               {isRecording ? (
                 <>
@@ -409,8 +408,10 @@ const Shadow = () => {
               )}
             </Button>
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          {speechError && <p className="text-sm text-destructive">{speechError}</p>}
+          {transcriptionError && <p className="text-sm text-destructive">{transcriptionError}</p>}
+          {isTranscribing && (
+            <p className="text-xs text-muted-foreground">Transcribing latest recording...</p>
+          )}
         </CardContent>
       </Card>
 
