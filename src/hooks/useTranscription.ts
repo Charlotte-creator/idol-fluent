@@ -43,6 +43,14 @@ function getFileExtension(blobType: string): string {
   return "webm";
 }
 
+export function normalizeLanguageHint(rawLanguage: string): string {
+  const cleaned = rawLanguage.trim();
+  if (!cleaned) return "";
+
+  const normalized = cleaned.replaceAll("_", "-");
+  return normalized.split("-", 1)[0].toLowerCase();
+}
+
 function extractErrorMessage(raw: unknown): string | null {
   if (!raw || typeof raw !== "object") return null;
   const payload = raw as Record<string, unknown>;
@@ -137,7 +145,7 @@ export function useTranscription() {
     async (options: StopAndTranscribeOptions = {}): Promise<TranscriptionResponse | null> => {
       setError(null);
 
-      const languageHint = (options.language || language).trim();
+      const languageHint = normalizeLanguageHint(options.language || language);
       const durationHintSeconds = options.durationSeconds ?? duration;
 
       if (isRecordingRef.current) {
