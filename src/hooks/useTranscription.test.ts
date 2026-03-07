@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeLanguageHint } from "@/hooks/useTranscription";
+import { getTranscriptionRequestErrorMessage, normalizeLanguageHint } from "@/hooks/useTranscription";
 
 describe("normalizeLanguageHint", () => {
   it("normalizes locale tags to whisper base language codes", () => {
@@ -12,5 +12,21 @@ describe("normalizeLanguageHint", () => {
   it("returns lowercase codes and handles empty input", () => {
     expect(normalizeLanguageHint("EN")).toBe("en");
     expect(normalizeLanguageHint("   ")).toBe("");
+  });
+});
+
+describe("getTranscriptionRequestErrorMessage", () => {
+  it("maps fetch/network errors to a clear server connectivity message", () => {
+    expect(getTranscriptionRequestErrorMessage(new Error("fetch failed"))).toBe(
+      "Cannot reach the transcription service. Check your connection or server and try again.",
+    );
+  });
+
+  it("maps abort errors to a timeout message", () => {
+    const error = new Error("aborted");
+    error.name = "AbortError";
+    expect(getTranscriptionRequestErrorMessage(error)).toBe(
+      "Transcription timed out. Please try a shorter clip.",
+    );
   });
 });

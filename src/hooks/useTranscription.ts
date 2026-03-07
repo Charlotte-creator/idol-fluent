@@ -57,6 +57,27 @@ function extractErrorMessage(raw: unknown): string | null {
   return typeof payload.error === "string" ? payload.error : null;
 }
 
+export function getTranscriptionRequestErrorMessage(requestError: unknown): string {
+  if (!(requestError instanceof Error)) {
+    return "Transcription failed.";
+  }
+
+  if (requestError.name === "AbortError") {
+    return "Transcription timed out. Please try a shorter clip.";
+  }
+
+  const normalized = requestError.message.trim().toLowerCase();
+  if (
+    normalized === "failed to fetch" ||
+    normalized === "fetch failed" ||
+    normalized.includes("networkerror")
+  ) {
+    return "Cannot reach the transcription service. Check your connection or server and try again.";
+  }
+
+  return requestError.message || "Transcription failed.";
+}
+
 export function useTranscription() {
   const {
     isRecording,
@@ -207,12 +228,7 @@ export function useTranscription() {
         });
         return parsed;
       } catch (requestError) {
-        const message =
-          requestError instanceof Error
-            ? requestError.name === "AbortError"
-              ? "Transcription timed out. Please try a shorter clip."
-              : requestError.message
-            : "Transcription failed.";
+        const message = getTranscriptionRequestErrorMessage(requestError);
         setError(message);
         return null;
       } finally {

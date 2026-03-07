@@ -245,12 +245,13 @@ const Shadow = () => {
       setRounds((prev) => prev + 1);
       // Compute actual duration from recording (duration state may be stale)
       const durationSeconds = duration;
+      if (durationSeconds < 3) return;
       void (async () => {
         const transcription = await stopAndTranscribeRef.current({
           language: languageRef.current,
           durationSeconds,
         });
-        if (!transcription || durationSeconds < 3) return;
+        if (!transcription) return;
 
         const metrics = computeTranscriptMetrics(
           transcription.text,
@@ -419,19 +420,19 @@ const Shadow = () => {
         <Button
           className="w-full"
           size="lg"
-              onClick={() => {
-                // Destroy watch player before transitioning
-                if (playerRef.current?.destroy) {
-                  playerRef.current.destroy();
-                  playerRef.current = null;
-                  playerReadyRef.current = false;
-                }
-                pendingPlayIntentRef.current = true;
-                setAutoRecordError(null);
-                setCountdown(3);
-                setPhase("countdown");
-              }}
-            >
+          onClick={() => {
+            // Destroy watch player before transitioning
+            if (playerRef.current?.destroy) {
+              playerRef.current.destroy();
+              playerRef.current = null;
+              playerReadyRef.current = false;
+            }
+            pendingPlayIntentRef.current = true;
+            setAutoRecordError(null);
+            setCountdown(3);
+            setPhase("countdown");
+          }}
+        >
           Start Shadowing <ArrowRight className="ml-1 h-4 w-4" />
         </Button>
       </div>
@@ -456,6 +457,13 @@ const Shadow = () => {
   // Practice phase
   const formatTime = (s: number) =>
     `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const isLikelyMicrophoneError = (message: string) =>
+    /(microphone|permission|device|audio capture|getusermedia)/i.test(message);
+  const micError =
+    autoRecordError ||
+    (transcriptionError && isLikelyMicrophoneError(transcriptionError) ? transcriptionError : null);
+  const transcriptionIssue =
+    transcriptionError && !isLikelyMicrophoneError(transcriptionError) ? transcriptionError : null;
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 space-y-6">
@@ -500,7 +508,7 @@ const Shadow = () => {
             </div>
             <Button
               variant={isRecording ? "destructive" : "outline"}
-              onClick={isRecording ? stopRecording : retryMicrophone}
+              onClick={isRecording ? stopRecording : (micError ? retryMicrophone : requestPlay)}
             >
               {isRecording ? (
                 <>
@@ -508,19 +516,40 @@ const Shadow = () => {
                 </>
               ) : (
                 <>
-                  <Mic className="mr-1 h-4 w-4" /> Retry microphone
+                  {micError ? (
+                    <>
+                      <Mic className="mr-1 h-4 w-4" /> Retry microphone
+                    </>
+                  ) : (
+                    <>
+                      <Play className="mr-1 h-4 w-4" /> Play clip
+                    </>
+                  )}
                 </>
               )}
             </Button>
           </div>
-          {(autoRecordError || transcriptionError) && (
+          {micError && (
             <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
               <div className="flex items-start gap-2">
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <div className="space-y-2">
-                  <p>{autoRecordError || transcriptionError}</p>
+                  <p>{micError}</p>
                   <Button variant="outline" size="sm" onClick={retryMicrophone}>
                     Retry microphone
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+          {transcriptionIssue && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div className="space-y-2">
+                  <p>{transcriptionIssue}</p>
+                  <Button variant="outline" size="sm" onClick={requestPlay}>
+                    Retry take
                   </Button>
                 </div>
               </div>
