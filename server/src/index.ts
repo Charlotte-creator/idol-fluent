@@ -76,7 +76,7 @@ function hasAllowedExtension(fileName: string): boolean {
 // ── Health ──────────────────────────────────────────────────────────────────────
 
 app.get("/api/health", async (_req, res) => {
-  let sttStatus: { reachable: boolean; model?: string } = { reachable: false };
+  let sttStatus: { reachable: boolean; model?: string; timestamps?: string } = { reachable: false };
   try {
     const sttRes = await fetch(`${STT_URL}/health`, { signal: AbortSignal.timeout(3000) });
     if (sttRes.ok) {
@@ -84,6 +84,7 @@ app.get("/api/health", async (_req, res) => {
       sttStatus = {
         reachable: true,
         model: typeof data.model === "string" ? data.model : undefined,
+        timestamps: typeof data.timestamps === "string" ? data.timestamps : undefined,
       };
     }
   } catch {

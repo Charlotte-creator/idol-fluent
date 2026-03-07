@@ -8,6 +8,7 @@ export type TranscriptionSegment = {
 export type TranscriptionResponse = {
   text: string;
   language?: string;
+  durationSeconds?: number;
   duration?: number;
   segments?: TranscriptionSegment[];
   confidence?: number;
@@ -52,10 +53,20 @@ export function parseTranscriptionResponse(raw: unknown): TranscriptionResponse 
   }
 
   const payload = raw as Record<string, unknown>;
+  const durationSeconds =
+    toNumber(payload.durationSeconds) ??
+    toNumber(payload.duration) ??
+    (() => {
+      const durationMs = toNumber(payload.durationMs);
+      return durationMs != null ? durationMs / 1000 : undefined;
+    })();
+
   return {
     text: typeof payload.text === "string" ? payload.text.trim() : "",
     language: typeof payload.language === "string" ? payload.language : undefined,
-    duration: toNumber(payload.duration),
+    durationSeconds,
+    // Keep legacy `duration` for backward compatibility with existing UI code.
+    duration: durationSeconds,
     segments: parseSegments(payload.segments),
     confidence: toNumber(payload.confidence),
   };

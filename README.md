@@ -42,6 +42,7 @@ Set in `.env` or `docker-compose.yml`:
 | `WHISPER_MODEL` | `base` | `tiny`, `base`, `small`, `medium`, `large-v3` |
 | `WHISPER_DEVICE` | `cpu` | `cpu`, `cuda`, `auto` |
 | `WHISPER_COMPUTE_TYPE` | `int8` | `int8` (CPU), `float16` (GPU), `float32` |
+| `STT_TIMESTAMPS` | `segments` | `none`, `segments`, `words` |
 
 Larger models are more accurate but slower and use more RAM/VRAM.
 

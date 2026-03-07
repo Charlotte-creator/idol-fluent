@@ -2,6 +2,22 @@
 
 This document defines manual QA coverage for the ShadowSpeak app after migrating transcription from browser `SpeechRecognition` to backend `/api/transcribe`.
 
+## Step 0: Timestamp Capability Note
+
+Current end-to-end transcription payloads include:
+- `text`
+- `duration` (legacy seconds field)
+- `segments` with `{ start, end, text, confidence? }` when timestamp mode is enabled
+
+Gaps found and addressed:
+- No stable `durationSeconds` field contract across STT/frontend parser.
+- No explicit timestamp mode control.
+
+New behavior:
+- STT now supports `STT_TIMESTAMPS=none|segments|words` (default `segments`).
+- STT returns `durationSeconds` and keeps `duration` for backward compatibility.
+- Frontend parser normalizes `durationSeconds`/`duration`/`durationMs` into a stable `durationSeconds`.
+
 ## 1) Critical Flows + Acceptance Criteria
 
 ### Flow: Create Clip
@@ -128,7 +144,7 @@ Notes:
 
 Preconditions:
 - `npm run dev` running.
-- `.env` configured with valid `OPENAI_API_KEY`.
+- `.env` configured with valid local STT settings (`STT_URL`, `WHISPER_MODEL`, etc.).
 
 ### Checklist
 1. Home page loads, nav links work.

@@ -10,6 +10,7 @@ services:
       - WHISPER_DEVICE=${WHISPER_DEVICE:-cpu}
       - WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
       - STT_MAX_CONCURRENT=${STT_MAX_CONCURRENT:-2}
+      - STT_TIMESTAMPS=${STT_TIMESTAMPS:-segments}
     volumes:
       - whisper-cache:/root/.cache
     restart: unless-stopped

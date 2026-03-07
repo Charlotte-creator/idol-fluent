@@ -14,6 +14,7 @@ describe("parseTranscriptionResponse", () => {
     expect(parsed).toEqual({
       text: "Hello world",
       language: "en",
+      durationSeconds: 12.5,
       duration: 12.5,
       confidence: 0.93,
       segments: undefined,
@@ -31,10 +32,21 @@ describe("parseTranscriptionResponse", () => {
     });
 
     expect(parsed.text).toBe("test");
+    expect(parsed.durationSeconds).toBe(15.4);
     expect(parsed.duration).toBe(15.4);
     expect(parsed.segments).toEqual([
       { start: 0, end: 0.9, text: "Hi", confidence: undefined },
     ]);
+  });
+
+  it("prefers durationSeconds and falls back to durationMs", () => {
+    const fromSeconds = parseTranscriptionResponse({ text: "hello", durationSeconds: 9.2, duration: 4 });
+    expect(fromSeconds.durationSeconds).toBe(9.2);
+    expect(fromSeconds.duration).toBe(9.2);
+
+    const fromMs = parseTranscriptionResponse({ text: "hello", durationMs: 3200 });
+    expect(fromMs.durationSeconds).toBe(3.2);
+    expect(fromMs.duration).toBe(3.2);
   });
 
   it("returns empty text on invalid data", () => {
