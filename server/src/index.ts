@@ -131,7 +131,12 @@ app.post("/api/transcribe", applyRateLimit, upload.single("audio"), async (req, 
     const totalMs = Date.now() - startedAt;
 
     if (!sttRes.ok) {
-      const status = sttRes.status === 429 ? 429 : 502;
+      const status =
+        sttRes.status === 429
+          ? 429
+          : sttRes.status >= 400 && sttRes.status < 500
+            ? sttRes.status
+            : 502;
       const msg =
         payload && typeof payload === "object" && "detail" in payload
           ? typeof payload.detail === "string"
@@ -142,11 +147,18 @@ app.post("/api/transcribe", applyRateLimit, upload.single("audio"), async (req, 
       return;
     }
 
-    if (!payload || typeof payload !== "object" || !payload.text) {
-      res.status(502).json({ error: "STT service returned no text." });
+    if (!payload || typeof payload !== "object") {
+      res.status(502).json({ error: "STT service returned invalid response." });
       return;
     }
 
+    const text = typeof payload.text === "string" ? payload.text.trim() : "";
+    if (!text) {
+      res.status(422).json({ error: "No speech detected. Please try again and speak clearly." });
+      return;
+    }
+
+    (payload as Record<string, unknown>).text = text;
     res.setHeader("server-timing", `stt;dur=${totalMs}`);
     res.json(payload);
   } catch (err: unknown) {

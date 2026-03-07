@@ -74,6 +74,12 @@ export function getTranscriptionRequestErrorMessage(requestError: unknown): stri
   ) {
     return "Cannot reach the transcription service. Check your connection or server and try again.";
   }
+  if (
+    normalized.includes("returned empty text") ||
+    normalized.includes("returned no text")
+  ) {
+    return "No speech detected. Please try again and speak clearly.";
+  }
 
   return requestError.message || "Transcription failed.";
 }
@@ -213,7 +219,7 @@ export function useTranscription() {
 
         const parsed = parseTranscriptionResponse(payload);
         if (!parsed.text) {
-          throw new Error("Transcription completed but returned empty text.");
+          throw new Error("No speech detected. Please try again and speak clearly.");
         }
 
         setTranscript(parsed.text);

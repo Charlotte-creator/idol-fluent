@@ -29,4 +29,12 @@ describe("getTranscriptionRequestErrorMessage", () => {
       "Transcription timed out. Please try a shorter clip.",
     );
   });
+
+  it("maps empty transcript errors to a user-friendly no-speech message", () => {
+    expect(
+      getTranscriptionRequestErrorMessage(
+        new Error("Transcription completed but returned empty text."),
+      ),
+    ).toBe("No speech detected. Please try again and speak clearly.");
+  });
 });

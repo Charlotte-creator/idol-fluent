@@ -250,6 +250,12 @@ async def transcribe(
             elapsed_ms = (time.monotonic_ns() // 1_000_000) - start_ms
             result["processingMs"] = elapsed_ms
 
+            if not str(result.get("text", "")).strip():
+                raise HTTPException(
+                    status_code=422,
+                    detail="No speech detected. Please try again and speak clearly.",
+                )
+
             return JSONResponse(content=result)
         except RuntimeError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
