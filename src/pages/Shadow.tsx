@@ -6,6 +6,7 @@ import { AspectRatio } from "@/components/ui/aspect-ratio";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  AlertCircle,
   Play,
   Mic,
   MicOff,
@@ -21,6 +22,8 @@ import { useTranscription } from "@/hooks/useTranscription";
 import { usePauseSensitivity } from "@/hooks/usePauseSensitivity";
 import { SpeechRecognitionSettings } from "@/components/SpeechRecognitionSettings";
 import { computeTranscriptMetrics } from "@/lib/speechMetrics";
+import { PracticeCountdown } from "@/components/PracticeCountdown";
+import { createShadowAutoRecorder } from "@/lib/shadowAutoRecorder";
 
 declare global {
   interface Window {
@@ -43,11 +46,14 @@ const Shadow = () => {
   const [countdown, setCountdown] = useState(3);
   const [rounds, setRounds] = useState(0);
   const [recordings, setRecordings] = useState<string[]>([]);
+  const [playbackStatus, setPlaybackStatus] = useState<"recording" | "paused" | "analyzing">("paused");
+  const [autoRecordError, setAutoRecordError] = useState<string | null>(null);
   const { pauseSensitivity, pauseThresholdSeconds, setPauseSensitivity } = usePauseSensitivity();
   const playerRef = useRef<any>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const playerReadyRef = useRef(false);
   const isRecordingRef = useRef(false);
+  const pendingPlayIntentRef = useRef(false);
   const stopRef = useRef<() => void>(() => {});
 
   const {
@@ -75,6 +81,41 @@ const Shadow = () => {
   const startRef = useRef(startRecording);
   useEffect(() => { startRef.current = startRecording; }, [startRecording]);
 
+  const autoRecorderRef = useRef(
+    createShadowAutoRecorder({
+      isPracticePhase: () => phaseRef.current === "practice",
+      isRecording: () => isRecordingRef.current,
+      startRecording: () => startRef.current(),
+      stopRecording: () => stopRef.current(),
+    }),
+  );
+
+  const ensureRecordingForPlayback = useCallback(async () => {
+    const outcome = await autoRecorderRef.current.onPlayerPlaying();
+    if (outcome === "started") {
+      setAutoRecordError(null);
+      setPlaybackStatus("recording");
+    } else if (outcome === "failed") {
+      setAutoRecordError(
+        "Microphone unavailable. Playback is still running. Retry microphone to record this take.",
+      );
+      setPlaybackStatus("paused");
+    }
+  }, []);
+
+  const requestPlay = useCallback(() => {
+    pendingPlayIntentRef.current = true;
+    if (phaseRef.current === "countdown") return;
+    if (!playerReadyRef.current) return;
+    playerRef.current?.seekTo(clip?.startTime ?? 0, true);
+    playerRef.current?.playVideo();
+  }, [clip?.startTime]);
+
+  const retryMicrophone = useCallback(() => {
+    setAutoRecordError(null);
+    requestPlay();
+  }, [requestPlay]);
+
   const initPlayer = useCallback(() => {
     if (!clip || !window.YT?.Player) return;
     // Destroy previous player if exists
@@ -95,37 +136,67 @@ const Shadow = () => {
       events: {
         onReady: () => {
           playerReadyRef.current = true;
-          playerRef.current?.seekTo(clip.startTime, true);
-          playerRef.current?.playVideo();
-          // Only auto-record in practice phase
-          if (phaseRef.current === "practice") {
-            startRef.current();
+          if (phaseRef.current === "watch") {
+            playerRef.current?.seekTo(clip.startTime, true);
+            playerRef.current?.playVideo();
+            return;
+          }
+          if (phaseRef.current === "practice" && pendingPlayIntentRef.current) {
+            pendingPlayIntentRef.current = false;
+            playerRef.current?.seekTo(clip.startTime, true);
+            playerRef.current?.playVideo();
           }
         },
         onStateChange: (event: any) => {
-          if (event.data === window.YT.PlayerState.PLAYING) {
+          const state = event.data;
+          if (state === window.YT.PlayerState.PLAYING) {
+            if (phaseRef.current === "practice") {
+              void ensureRecordingForPlayback();
+            }
+            if (intervalRef.current) clearInterval(intervalRef.current);
             intervalRef.current = setInterval(() => {
               const time = playerRef.current?.getCurrentTime?.();
               if (time && time >= clip.endTime) {
                 playerRef.current.pauseVideo();
                 playerRef.current.seekTo(clip.startTime, true);
                 if (intervalRef.current) clearInterval(intervalRef.current);
-                if (isRecordingRef.current) {
-                  stopRef.current();
+                if (phaseRef.current === "practice") {
+                  autoRecorderRef.current.onPlayerPausedOrEnded();
+                  setPlaybackStatus("paused");
                 }
               }
             }, 500);
-          } else {
+            return;
+          }
+
+          if (
+            state === window.YT.PlayerState.PAUSED ||
+            state === window.YT.PlayerState.ENDED
+          ) {
+            if (phaseRef.current === "practice") {
+              autoRecorderRef.current.onPlayerPausedOrEnded();
+              setPlaybackStatus("paused");
+            }
+          }
+
+          if (
+            state === window.YT.PlayerState.PAUSED ||
+            state === window.YT.PlayerState.ENDED ||
+            state === window.YT.PlayerState.BUFFERING
+          ) {
             if (intervalRef.current) clearInterval(intervalRef.current);
           }
         },
       },
     });
-  }, [clip]);
+  }, [clip, ensureRecordingForPlayback]);
 
   // Load YouTube API early (during env-check)
   useEffect(() => {
     if (!clip) return;
+    if (window.YT?.Player) {
+      return;
+    }
     if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
       const tag = document.createElement("script");
       tag.src = "https://www.youtube.com/iframe_api";
@@ -158,7 +229,14 @@ const Shadow = () => {
     return () => clearTimeout(timer);
   }, [phase, countdown]);
 
-  // (Auto-play and recording are triggered by onReady in initPlayer)
+  useEffect(() => {
+    if (phase !== "practice") return;
+    if (isTranscribing) {
+      setPlaybackStatus("analyzing");
+      return;
+    }
+    setPlaybackStatus(isRecording ? "recording" : "paused");
+  }, [phase, isRecording, isTranscribing]);
 
   // Save recording and speech metrics when audioUrl changes
   useEffect(() => {
@@ -326,10 +404,7 @@ const Shadow = () => {
         <Button
           variant="outline"
           className="w-full"
-          onClick={() => {
-            playerRef.current?.seekTo(clip.startTime, true);
-            playerRef.current?.playVideo();
-          }}
+          onClick={requestPlay}
         >
           <Play className="mr-1 h-4 w-4" /> Play Clip Again
         </Button>
@@ -344,17 +419,19 @@ const Shadow = () => {
         <Button
           className="w-full"
           size="lg"
-          onClick={() => {
-            // Destroy watch player before transitioning
-            if (playerRef.current?.destroy) {
-              playerRef.current.destroy();
-              playerRef.current = null;
-              playerReadyRef.current = false;
-            }
-            setCountdown(3);
-            setPhase("countdown");
-          }}
-        >
+              onClick={() => {
+                // Destroy watch player before transitioning
+                if (playerRef.current?.destroy) {
+                  playerRef.current.destroy();
+                  playerRef.current = null;
+                  playerReadyRef.current = false;
+                }
+                pendingPlayIntentRef.current = true;
+                setAutoRecordError(null);
+                setCountdown(3);
+                setPhase("countdown");
+              }}
+            >
           Start Shadowing <ArrowRight className="ml-1 h-4 w-4" />
         </Button>
       </div>
@@ -364,12 +441,15 @@ const Shadow = () => {
   // Countdown phase
   if (phase === "countdown") {
     return (
-      <div className="mx-auto max-w-2xl px-4 py-8 flex flex-col items-center justify-center min-h-[60vh]">
-        <p className="text-sm text-muted-foreground mb-4">Get ready to shadow...</p>
-        <div className="text-9xl font-bold text-primary animate-pulse">
-          {countdown}
-        </div>
-      </div>
+      <PracticeCountdown
+        seconds={countdown}
+        title="Get ready to shadow"
+        subtitle="Playback and recording will start automatically."
+        cancelLabel="Play when countdown ends"
+        onCancel={() => {
+          pendingPlayIntentRef.current = true;
+        }}
+      />
     );
   }
 
@@ -399,12 +479,9 @@ const Shadow = () => {
       <Button
         variant="outline"
         className="w-full"
-        onClick={() => {
-          playerRef.current?.seekTo(clip.startTime, true);
-          playerRef.current?.playVideo();
-        }}
+        onClick={requestPlay}
       >
-        <Play className="mr-1 h-4 w-4" /> Play Clip Again
+        <Play className="mr-1 h-4 w-4" /> Play Clip (Auto Record)
       </Button>
 
       {/* Recording Controls */}
@@ -414,12 +491,16 @@ const Shadow = () => {
             <div>
               <h3 className="font-semibold text-foreground">Your Recording</h3>
               <p className="text-sm text-muted-foreground">
-                {isRecording ? `Recording... ${formatTime(duration)}` : "Ready to record"}
+                {playbackStatus === "recording"
+                  ? `Recording... ${formatTime(duration)}`
+                  : playbackStatus === "analyzing"
+                    ? "Analyzing..."
+                    : "Paused"}
               </p>
             </div>
             <Button
-              variant={isRecording ? "destructive" : "default"}
-              onClick={isRecording ? stopRecording : startRecording}
+              variant={isRecording ? "destructive" : "outline"}
+              onClick={isRecording ? stopRecording : retryMicrophone}
             >
               {isRecording ? (
                 <>
@@ -427,12 +508,24 @@ const Shadow = () => {
                 </>
               ) : (
                 <>
-                  <Mic className="mr-1 h-4 w-4" /> Record
+                  <Mic className="mr-1 h-4 w-4" /> Retry microphone
                 </>
               )}
             </Button>
           </div>
-          {transcriptionError && <p className="text-sm text-destructive">{transcriptionError}</p>}
+          {(autoRecordError || transcriptionError) && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div className="space-y-2">
+                  <p>{autoRecordError || transcriptionError}</p>
+                  <Button variant="outline" size="sm" onClick={retryMicrophone}>
+                    Retry microphone
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
           {isTranscribing && (
             <p className="text-xs text-muted-foreground">Transcribing latest recording...</p>
           )}
