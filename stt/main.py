@@ -160,57 +160,70 @@ def _serialize_words(segment: Any) -> list[dict[str, Any]] | None:
 
 def _transcribe_sync(audio_path: str, language: str | None, prompt_phrases: list[str]):
     model = _get_model()
-    kwargs: dict[str, Any] = {"beam_size": 5, "vad_filter": True}
+    base_kwargs: dict[str, Any] = {"beam_size": 5}
 
     if language:
-        kwargs["language"] = language
+        base_kwargs["language"] = language
 
     if prompt_phrases:
-        kwargs["initial_prompt"] = ", ".join(prompt_phrases)
+        base_kwargs["initial_prompt"] = ", ".join(prompt_phrases)
 
     if _timestamp_mode == "words":
-        kwargs["word_timestamps"] = True
+        base_kwargs["word_timestamps"] = True
 
-    segments_iter, info = model.transcribe(audio_path, **kwargs)
-    full_text_parts: list[str] = []
-    segments: list[dict[str, Any]] = []
+    def run_pass(vad_filter: bool) -> dict[str, Any]:
+        kwargs = {**base_kwargs, "vad_filter": vad_filter}
+        segments_iter, info = model.transcribe(audio_path, **kwargs)
+        full_text_parts: list[str] = []
+        segments: list[dict[str, Any]] = []
 
-    for segment in segments_iter:
-        text = segment.text.strip()
-        if not text:
-            continue
+        for segment in segments_iter:
+            text = segment.text.strip()
+            if not text:
+                continue
 
-        full_text_parts.append(text)
+            full_text_parts.append(text)
 
-        if _timestamp_mode == "none":
-            continue
+            if _timestamp_mode == "none":
+                continue
 
-        segment_payload: dict[str, Any] = {
-            "start": round(float(segment.start), 3),
-            "end": round(float(segment.end), 3),
-            "text": text,
+            segment_payload: dict[str, Any] = {
+                "start": round(float(segment.start), 3),
+                "end": round(float(segment.end), 3),
+                "text": text,
+            }
+
+            confidence = _segment_confidence(segment)
+            if confidence is not None:
+                segment_payload["confidence"] = confidence
+
+            if _timestamp_mode == "words":
+                words = _serialize_words(segment)
+                if words:
+                    segment_payload["words"] = words
+
+            segments.append(segment_payload)
+
+        duration_seconds = round(float(getattr(info, "duration", 0.0) or 0.0), 3)
+        return {
+            "text": " ".join(full_text_parts).strip(),
+            "language": getattr(info, "language", None) or language,
+            "durationSeconds": duration_seconds,
+            # Keep legacy field for backward compatibility.
+            "duration": duration_seconds,
+            "segments": segments if segments else None,
         }
 
-        confidence = _segment_confidence(segment)
-        if confidence is not None:
-            segment_payload["confidence"] = confidence
+    # First pass uses VAD for cleaner segmentation.
+    result = run_pass(vad_filter=True)
+    if str(result.get("text", "")).strip():
+        return result
 
-        if _timestamp_mode == "words":
-            words = _serialize_words(segment)
-            if words:
-                segment_payload["words"] = words
-
-        segments.append(segment_payload)
-
-    duration_seconds = round(float(getattr(info, "duration", 0.0) or 0.0), 3)
-    return {
-        "text": " ".join(full_text_parts).strip(),
-        "language": getattr(info, "language", None) or language,
-        "durationSeconds": duration_seconds,
-        # Keep legacy field for backward compatibility.
-        "duration": duration_seconds,
-        "segments": segments if segments else None,
-    }
+    # Fallback pass without VAD recovers low-volume/short utterances.
+    fallback = run_pass(vad_filter=False)
+    if str(fallback.get("text", "")).strip():
+        fallback["vadFallback"] = "disabled-vad"
+    return fallback
 
 
 @app.post("/transcribe")
