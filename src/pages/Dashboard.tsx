@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { getSessions, getClips } from "@/lib/clipStore";
-import { BarChart3, Mic, Gauge, Flame, Plus } from "lucide-react";
+import { BarChart3, Mic, Gauge, Flame, Plus, Pause } from "lucide-react";
 import {
   ChartContainer,
   ChartTooltip,
@@ -23,6 +23,7 @@ import { format, parseISO } from "date-fns";
 
 const Dashboard = () => {
   const navigate = useNavigate();
+  const [secondaryChart, setSecondaryChart] = useState<"fillers" | "pauses">("fillers");
   const sessions = getSessions();
   const clips = getClips();
   
@@ -62,16 +63,41 @@ const Dashboard = () => {
   const chartData = useMemo(() => {
     // Filter out outliers (e.g. race condition producing 1300 WPM)
     const valid = sessions.filter((s) => s.wordsPerMinute <= 300);
-    const grouped: Record<string, { retellWpm: number[]; shadowWpm: number[]; retellFillers: number[]; shadowFillers: number[] }> = {};
+    const grouped: Record<
+      string,
+      {
+        retellWpm: number[];
+        shadowWpm: number[];
+        retellFillers: number[];
+        shadowFillers: number[];
+        retellSilentPauses: number[];
+        shadowSilentPauses: number[];
+      }
+    > = {};
     for (const s of valid) {
       const key = format(new Date(s.date), "yyyy-MM-dd");
-      if (!grouped[key]) grouped[key] = { retellWpm: [], shadowWpm: [], retellFillers: [], shadowFillers: [] };
+      if (!grouped[key]) {
+        grouped[key] = {
+          retellWpm: [],
+          shadowWpm: [],
+          retellFillers: [],
+          shadowFillers: [],
+          retellSilentPauses: [],
+          shadowSilentPauses: [],
+        };
+      }
       if (s.type === "retell") {
         grouped[key].retellWpm.push(s.wordsPerMinute);
         grouped[key].retellFillers.push(s.fillerWordsPerMinute);
+        if (s.silentPauseRatePerMinute != null) {
+          grouped[key].retellSilentPauses.push(s.silentPauseRatePerMinute);
+        }
       } else {
         grouped[key].shadowWpm.push(s.wordsPerMinute);
         grouped[key].shadowFillers.push(s.fillerWordsPerMinute);
+        if (s.silentPauseRatePerMinute != null) {
+          grouped[key].shadowSilentPauses.push(s.silentPauseRatePerMinute);
+        }
       }
     }
     const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : undefined;
@@ -85,6 +111,8 @@ const Dashboard = () => {
           shadowWpm: avg(g.shadowWpm),
           retellFillers: avg(g.retellFillers),
           shadowFillers: avg(g.shadowFillers),
+          retellSilentPauses: avg(g.retellSilentPauses),
+          shadowSilentPauses: avg(g.shadowSilentPauses),
         };
       });
   }, [sessions]);
@@ -187,13 +215,38 @@ const Dashboard = () => {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Filler Words / Minute</CardTitle>
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle className="text-lg">
+                  {secondaryChart === "fillers" ? "Filler Words / Minute" : "Silent Pauses / Minute"}
+                </CardTitle>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant={secondaryChart === "fillers" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSecondaryChart("fillers")}
+                  >
+                    Fillers
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={secondaryChart === "pauses" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSecondaryChart("pauses")}
+                  >
+                    <Pause className="mr-1 h-4 w-4" />
+                    Pauses
+                  </Button>
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
               <ChartContainer
                 config={{
                   retellFillers: { label: "Retell Fillers/min", color: "hsl(var(--destructive))" },
                   shadowFillers: { label: "Shadow Fillers/min", color: "hsl(var(--muted-foreground))" },
+                  retellSilentPauses: { label: "Retell Silent Pauses/min", color: "hsl(var(--primary))" },
+                  shadowSilentPauses: { label: "Shadow Silent Pauses/min", color: "hsl(var(--muted-foreground))" },
                 }}
                 className="h-[200px]"
               >
@@ -202,8 +255,17 @@ const Dashboard = () => {
                   <XAxis dataKey="date" />
                   <YAxis />
                   <ChartTooltip content={<ChartTooltipContent />} />
-                  <Line type="monotone" dataKey="retellFillers" stroke="var(--color-retellFillers)" strokeWidth={2} dot connectNulls />
-                  <Line type="monotone" dataKey="shadowFillers" stroke="var(--color-shadowFillers)" strokeWidth={2} dot strokeDasharray="5 5" connectNulls />
+                  {secondaryChart === "fillers" ? (
+                    <>
+                      <Line type="monotone" dataKey="retellFillers" stroke="var(--color-retellFillers)" strokeWidth={2} dot connectNulls />
+                      <Line type="monotone" dataKey="shadowFillers" stroke="var(--color-shadowFillers)" strokeWidth={2} dot strokeDasharray="5 5" connectNulls />
+                    </>
+                  ) : (
+                    <>
+                      <Line type="monotone" dataKey="retellSilentPauses" stroke="var(--color-retellSilentPauses)" strokeWidth={2} dot connectNulls />
+                      <Line type="monotone" dataKey="shadowSilentPauses" stroke="var(--color-shadowSilentPauses)" strokeWidth={2} dot strokeDasharray="5 5" connectNulls />
+                    </>
+                  )}
                 </LineChart>
               </ChartContainer>
             </CardContent>

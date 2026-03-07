@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { getClip, saveSession, getSessionsForClip } from "@/lib/clipStore";
 import { useTranscription } from "@/hooks/useTranscription";
+import { usePauseSensitivity } from "@/hooks/usePauseSensitivity";
 import { SpeechRecognitionSettings } from "@/components/SpeechRecognitionSettings";
 import { computeTranscriptMetrics, type AnalysisResult } from "@/lib/speechMetrics";
 
@@ -40,6 +41,8 @@ const Retell = () => {
   const [remaining, setRemaining] = useState(0);
   const [warning, setWarning] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [analysisDurationSeconds, setAnalysisDurationSeconds] = useState(0);
+  const { pauseSensitivity, pauseThresholdSeconds, setPauseSensitivity } = usePauseSensitivity();
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isFinalizingRef = useRef(false);
@@ -67,6 +70,7 @@ const Retell = () => {
   const handleStart = useCallback(async () => {
     setRemaining(timeLimit * 60);
     setWarning(false);
+    setAnalysisDurationSeconds(0);
     const started = await startRecording();
     if (!started) return;
     isFinalizingRef.current = false;
@@ -94,34 +98,42 @@ const Retell = () => {
 
   // When recording stops, analyze
   useEffect(() => {
-    if (phase !== "recording" || isRecording || duration <= 0 || isFinalizingRef.current) return;
+    if (phase !== "recording" || isRecording || isFinalizingRef.current) return;
 
     isFinalizingRef.current = true;
     setPhase("analyzing");
 
     void (async () => {
+      const durationHint = duration > 0 ? duration : undefined;
       const transcription = await stopAndTranscribe({
         language,
-        durationSeconds: duration,
+        durationSeconds: durationHint,
       });
 
       if (transcription) {
+        const effectiveDuration = transcription.durationSeconds ?? transcription.duration ?? durationHint ?? 0;
         const metrics = computeTranscriptMetrics(
           transcription.text,
-          transcription.duration ?? duration,
+          effectiveDuration,
           [],
-          { segments: transcription.segments },
+          {
+            segments: transcription.segments,
+            pauseThresholdSeconds,
+          },
         );
         setAnalysisResult({
           transcript: transcription.text,
           ...metrics,
         });
+        setAnalysisDurationSeconds(effectiveDuration);
+      } else {
+        setAnalysisDurationSeconds(durationHint ?? 0);
       }
 
       setPhase("results");
       isFinalizingRef.current = false;
     })();
-  }, [duration, isRecording, language, phase, stopAndTranscribe]);
+  }, [duration, isRecording, language, pauseThresholdSeconds, phase, stopAndTranscribe]);
 
   // Cleanup timer
   useEffect(() => {
@@ -138,12 +150,26 @@ const Retell = () => {
       wordsPerMinute: analysisResult.wordsPerMinute,
       fillerWordCount: analysisResult.fillerWordCount,
       fillerWordsPerMinute: analysisResult.fillerWordsPerMinute,
+      fillerRatePerMinute: analysisResult.fillerRatePerMinute,
+      fillerCountStrong: analysisResult.fillerCountStrong,
+      fillerCountContextual: analysisResult.fillerCountContextual,
       expressionsUsed: analysisResult.expressionsUsed,
-      durationSeconds: duration,
+      durationSeconds: analysisDurationSeconds > 0 ? analysisDurationSeconds : duration,
       totalWords: analysisResult.totalWords,
       pauseRatio: analysisResult.pauseRatio,
+      pauseMethod: analysisResult.pauseMethod,
+      silentPauseCount: analysisResult.silentPauseCount,
+      silentPauseTotalSeconds: analysisResult.silentPauseTotalSeconds,
+      silentPauseRatePerMinute: analysisResult.silentPauseRatePerMinute,
+      silentPauseAvgSeconds: analysisResult.silentPauseAvgSeconds,
+      silentPauseP95Seconds: analysisResult.silentPauseP95Seconds,
+      longestSilentPauseSeconds: analysisResult.longestSilentPauseSeconds,
+      silentPauseHistogram: analysisResult.silentPauseHistogram,
+      choppinessCount: analysisResult.choppinessCount,
       vocabularyRichness: analysisResult.vocabularyRichness,
       elongationCount: analysisResult.elongationCount,
+      repetitionCount: analysisResult.repetitionCount,
+      repairCount: analysisResult.repairCount,
       timeLimitMinutes: timeLimit,
       transcript: analysisResult.transcript,
     });
@@ -236,7 +262,12 @@ const Retell = () => {
           </CardContent>
         </Card>
 
-        <SpeechRecognitionSettings language={language} onLanguageChange={setLanguage} />
+        <SpeechRecognitionSettings
+          language={language}
+          onLanguageChange={setLanguage}
+          pauseSensitivity={pauseSensitivity}
+          onPauseSensitivityChange={setPauseSensitivity}
+        />
 
         <Button size="lg" className="w-full" onClick={handleStart}>
           <Mic className="mr-1 h-4 w-4" /> Start Retelling ({timeLimit} min)
@@ -349,7 +380,7 @@ const Retell = () => {
       <div>
         <h1 className="text-2xl font-bold text-foreground">Your Results</h1>
         <p className="text-sm text-muted-foreground">
-          {clip.title} · {formatTime(duration)} recorded
+          {clip.title} · {formatTime(Math.max(0, Math.round(analysisDurationSeconds || duration)))} recorded
         </p>
       </div>
 
@@ -522,7 +553,21 @@ const Retell = () => {
         </>
       )}
 
-      <Button size="lg" className="w-full" onClick={handleSave}>
+      {!analysisResult && transcriptionError && (
+        <Card className="border-destructive/30">
+          <CardHeader>
+            <CardTitle className="text-lg text-destructive">Transcription Failed</CardTitle>
+            <CardDescription>{transcriptionError}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button variant="outline" onClick={() => setPhase("setup")}>
+              Try Again
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      <Button size="lg" className="w-full" onClick={handleSave} disabled={!analysisResult}>
         <BarChart3 className="mr-1 h-4 w-4" /> Save & View Dashboard <ArrowRight className="ml-1 h-4 w-4" />
       </Button>
     </div>

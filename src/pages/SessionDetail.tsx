@@ -4,7 +4,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AspectRatio } from "@/components/ui/aspect-ratio";
-import { ArrowLeft, Gauge, MessageSquare, Clock, Brain, Pause, BookOpen, AlertTriangle, Timer } from "lucide-react";
+import {
+  ArrowLeft,
+  Gauge,
+  MessageSquare,
+  Clock,
+  Brain,
+  Pause,
+  BookOpen,
+  AlertTriangle,
+  Timer,
+} from "lucide-react";
 import { format } from "date-fns";
 
 const formatTime = (s: number) => {
@@ -43,6 +53,13 @@ const SessionDetail = () => {
     );
   }
 
+  const pauseMethodLabel =
+    session.pauseMethod === "timestamps"
+      ? "timestamp gaps from STT segments"
+      : session.pauseMethod === "text"
+        ? "text fallback estimates"
+        : "legacy session metric (no pause method metadata)";
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 space-y-6">
       <Button variant="ghost" size="sm" onClick={() => navigate("/dashboard")}>
@@ -67,14 +84,32 @@ const SessionDetail = () => {
             <MetricCard icon={MessageSquare} label="Total Words" value={session.totalWords} />
             <MetricCard icon={AlertTriangle} label="Filler Words" value={session.fillerWordCount} />
             <MetricCard icon={AlertTriangle} label="Fillers / Minute" value={Math.round(session.fillerWordsPerMinute * 10) / 10} unit="/min" />
+            <MetricCard icon={AlertTriangle} label="Strong Fillers" value={session.fillerCountStrong ?? "—"} />
+            <MetricCard icon={AlertTriangle} label="Contextual Fillers" value={session.fillerCountContextual ?? "—"} />
             <MetricCard icon={Pause} label="Hesitations" value={session.elongationCount} />
+            <MetricCard icon={Pause} label="Silent Pauses / Minute" value={session.silentPauseRatePerMinute ?? "—"} unit="/min" />
+            <MetricCard icon={Pause} label="Longest Silent Pause" value={session.longestSilentPauseSeconds != null ? session.longestSilentPauseSeconds : "—"} unit={session.longestSilentPauseSeconds != null ? "s" : undefined} />
+            <MetricCard icon={Pause} label="Total Silent Pause" value={session.silentPauseTotalSeconds != null ? session.silentPauseTotalSeconds : "—"} unit={session.silentPauseTotalSeconds != null ? "s" : undefined} />
             <MetricCard icon={Brain} label="Vocabulary Richness" value={`${Math.round(session.vocabularyRichness * 100)}%`} />
             <MetricCard icon={BookOpen} label="Pause Ratio" value={`${Math.round(session.pauseRatio * 100)}%`} />
             <MetricCard icon={Clock} label="Duration" value={formatTime(session.durationSeconds)} />
+            <MetricCard icon={MessageSquare} label="Repetitions" value={session.repetitionCount ?? "—"} />
+            <MetricCard icon={MessageSquare} label="Repairs" value={session.repairCount ?? "—"} />
             {session.timeLimitMinutes && (
               <MetricCard icon={Timer} label="Time Limit" value={`${session.timeLimitMinutes} min`} />
             )}
           </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">How It's Measured</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                Pause metrics are calculated via {pauseMethodLabel}.
+              </p>
+            </CardContent>
+          </Card>
 
           {session.expressionsUsed.length > 0 && (
             <Card>

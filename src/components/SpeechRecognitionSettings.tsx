@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { PauseSensitivity } from "@/hooks/usePauseSensitivity";
 
 type LanguageOption = {
   value: string;
@@ -25,11 +26,15 @@ const COMMON_LANGUAGE_OPTIONS: LanguageOption[] = [
 interface SpeechRecognitionSettingsProps {
   language: string;
   onLanguageChange: (language: string) => void;
+  pauseSensitivity: PauseSensitivity;
+  onPauseSensitivityChange: (value: PauseSensitivity) => void;
 }
 
 export function SpeechRecognitionSettings({
   language,
   onLanguageChange,
+  pauseSensitivity,
+  onPauseSensitivityChange,
 }: SpeechRecognitionSettingsProps) {
   const languageOptions = useMemo(() => {
     const options = [...COMMON_LANGUAGE_OPTIONS];
@@ -48,20 +53,36 @@ export function SpeechRecognitionSettings({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="space-y-2">
-          <Label htmlFor="transcription-language">Language</Label>
-          <Select value={language} onValueChange={onLanguageChange}>
-            <SelectTrigger id="transcription-language">
-              <SelectValue placeholder="Select language" />
-            </SelectTrigger>
-            <SelectContent>
-              {languageOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="transcription-language">Language</Label>
+            <Select value={language} onValueChange={onLanguageChange}>
+              <SelectTrigger id="transcription-language">
+                <SelectValue placeholder="Select language" />
+              </SelectTrigger>
+              <SelectContent>
+                {languageOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="pause-sensitivity">Pause Sensitivity</Label>
+            <Select value={pauseSensitivity} onValueChange={(value) => onPauseSensitivityChange(value as PauseSensitivity)}>
+              <SelectTrigger id="pause-sensitivity">
+                <SelectValue placeholder="Select pause sensitivity" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="strict">Strict (0.4s)</SelectItem>
+                <SelectItem value="normal">Normal (0.6s)</SelectItem>
+                <SelectItem value="lenient">Lenient (0.9s)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </CardContent>
     </Card>

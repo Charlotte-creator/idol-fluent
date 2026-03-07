@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { getClip, saveSession } from "@/lib/clipStore";
 import { useTranscription } from "@/hooks/useTranscription";
+import { usePauseSensitivity } from "@/hooks/usePauseSensitivity";
 import { SpeechRecognitionSettings } from "@/components/SpeechRecognitionSettings";
 import { computeTranscriptMetrics } from "@/lib/speechMetrics";
 
@@ -42,6 +43,7 @@ const Shadow = () => {
   const [countdown, setCountdown] = useState(3);
   const [rounds, setRounds] = useState(0);
   const [recordings, setRecordings] = useState<string[]>([]);
+  const { pauseSensitivity, pauseThresholdSeconds, setPauseSensitivity } = usePauseSensitivity();
   const playerRef = useRef<any>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const playerReadyRef = useRef(false);
@@ -174,9 +176,12 @@ const Shadow = () => {
 
         const metrics = computeTranscriptMetrics(
           transcription.text,
-          transcription.duration ?? durationSeconds,
+          transcription.durationSeconds ?? transcription.duration ?? durationSeconds,
           [],
-          { segments: transcription.segments },
+          {
+            segments: transcription.segments,
+            pauseThresholdSeconds,
+          },
         );
         saveSession({
           clipId: clip.id,
@@ -184,17 +189,31 @@ const Shadow = () => {
           wordsPerMinute: metrics.wordsPerMinute,
           fillerWordCount: metrics.fillerWordCount,
           fillerWordsPerMinute: metrics.fillerWordsPerMinute,
+          fillerRatePerMinute: metrics.fillerRatePerMinute,
+          fillerCountStrong: metrics.fillerCountStrong,
+          fillerCountContextual: metrics.fillerCountContextual,
           expressionsUsed: metrics.expressionsUsed,
           durationSeconds,
           totalWords: metrics.totalWords,
           pauseRatio: metrics.pauseRatio,
+          pauseMethod: metrics.pauseMethod,
+          silentPauseCount: metrics.silentPauseCount,
+          silentPauseTotalSeconds: metrics.silentPauseTotalSeconds,
+          silentPauseRatePerMinute: metrics.silentPauseRatePerMinute,
+          silentPauseAvgSeconds: metrics.silentPauseAvgSeconds,
+          silentPauseP95Seconds: metrics.silentPauseP95Seconds,
+          longestSilentPauseSeconds: metrics.longestSilentPauseSeconds,
+          silentPauseHistogram: metrics.silentPauseHistogram,
+          choppinessCount: metrics.choppinessCount,
           vocabularyRichness: metrics.vocabularyRichness,
           elongationCount: metrics.elongationCount,
+          repetitionCount: metrics.repetitionCount,
+          repairCount: metrics.repairCount,
           transcript: transcription.text,
         });
       })();
     }
-  }, [audioUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [audioUrl, pauseThresholdSeconds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!clip) {
     return (
@@ -275,7 +294,12 @@ const Shadow = () => {
           </CardContent>
         </Card>
 
-        <SpeechRecognitionSettings language={language} onLanguageChange={setLanguage} />
+        <SpeechRecognitionSettings
+          language={language}
+          onLanguageChange={setLanguage}
+          pauseSensitivity={pauseSensitivity}
+          onPauseSensitivityChange={setPauseSensitivity}
+        />
       </div>
     );
   }
