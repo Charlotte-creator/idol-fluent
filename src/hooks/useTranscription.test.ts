@@ -18,7 +18,7 @@ describe("normalizeLanguageHint", () => {
 describe("getTranscriptionRequestErrorMessage", () => {
   it("maps fetch/network errors to a clear server connectivity message", () => {
     expect(getTranscriptionRequestErrorMessage(new Error("fetch failed"))).toBe(
-      "Cannot reach the transcription service. Check your connection or server and try again.",
+      "Cannot reach the transcription service. If running locally, start services with `npm run dev` or `docker compose up --build`, then try again.",
     );
   });
 

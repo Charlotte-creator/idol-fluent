@@ -72,7 +72,7 @@ export function getTranscriptionRequestErrorMessage(requestError: unknown): stri
     normalized === "fetch failed" ||
     normalized.includes("networkerror")
   ) {
-    return "Cannot reach the transcription service. Check your connection or server and try again.";
+    return "Cannot reach the transcription service. If running locally, start services with `npm run dev` or `docker compose up --build`, then try again.";
   }
   if (
     normalized.includes("returned empty text") ||

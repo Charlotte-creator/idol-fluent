@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import dotenv from "dotenv";
-import express, { type NextFunction, type Request, type Response } from "express";
+import express, { type NextFunction, type Request, type Response as ExpressResponse } from "express";
 import multer from "multer";
 
 dotenv.config();
@@ -13,6 +13,8 @@ const PORT = Number(process.env.PORT || 8787);
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 20;
+const STT_MAX_FORWARD_ATTEMPTS = 3;
+const STT_RETRY_DELAY_MS = 700;
 const VALID_MIME_TYPES = new Set([
   "audio/webm",
   "audio/wav",
@@ -47,7 +49,7 @@ function cleanupRateLimitStore(now: number) {
   }
 }
 
-function applyRateLimit(req: Request, res: Response, next: NextFunction) {
+function applyRateLimit(req: Request, res: ExpressResponse, next: NextFunction) {
   const now = Date.now();
   cleanupRateLimitStore(now);
   const key = getClientIp(req);
@@ -71,6 +73,21 @@ function applyRateLimit(req: Request, res: Response, next: NextFunction) {
 
 function hasAllowedExtension(fileName: string): boolean {
   return VALID_EXTENSIONS.has(path.extname(fileName).toLowerCase());
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableSttError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("fetch failed") ||
+    message.includes("econnrefused") ||
+    message.includes("etimedout") ||
+    message.includes("socket hang up")
+  );
 }
 
 // ── Health ──────────────────────────────────────────────────────────────────────
@@ -116,18 +133,44 @@ app.post("/api/transcribe", applyRateLimit, upload.single("audio"), async (req, 
   const languageHint = typeof req.body.language === "string" ? req.body.language.trim() : "";
 
   try {
-    const form = new FormData();
-    form.append("file", new Blob([req.file.buffer], { type: mimeType }), fileName);
-    if (languageHint) form.append("language", languageHint);
-
     const startedAt = Date.now();
-    const sttRes = await fetch(`${STT_URL}/transcribe`, {
-      method: "POST",
-      body: form,
-      signal: AbortSignal.timeout(120_000),
-    });
+    let sttRes: globalThis.Response | null = null;
+    let payload: unknown = null;
+    for (let attempt = 1; attempt <= STT_MAX_FORWARD_ATTEMPTS; attempt += 1) {
+      const form = new FormData();
+      form.append("file", new Blob([req.file.buffer], { type: mimeType }), fileName);
+      if (languageHint) form.append("language", languageHint);
 
-    const payload = await sttRes.json().catch(() => null);
+      try {
+        sttRes = await fetch(`${STT_URL}/transcribe`, {
+          method: "POST",
+          body: form,
+          signal: AbortSignal.timeout(120_000),
+        });
+        payload = await sttRes.json().catch(() => null);
+
+        const shouldRetryStatus =
+          (sttRes.status === 429 || sttRes.status === 503) &&
+          attempt < STT_MAX_FORWARD_ATTEMPTS;
+        if (shouldRetryStatus) {
+          await sleep(STT_RETRY_DELAY_MS);
+          continue;
+        }
+        break;
+      } catch (error) {
+        if (attempt < STT_MAX_FORWARD_ATTEMPTS && isRetryableSttError(error)) {
+          await sleep(STT_RETRY_DELAY_MS);
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (!sttRes) {
+      res.status(502).json({ error: "STT service is unavailable. Please retry shortly." });
+      return;
+    }
+
     const totalMs = Date.now() - startedAt;
 
     if (!sttRes.ok) {
@@ -152,22 +195,23 @@ app.post("/api/transcribe", applyRateLimit, upload.single("audio"), async (req, 
       return;
     }
 
-    const text = typeof payload.text === "string" ? payload.text.trim() : "";
+    const payloadObject = payload as Record<string, unknown>;
+    const text = typeof payloadObject.text === "string" ? payloadObject.text.trim() : "";
     if (!text) {
       res.status(422).json({ error: "No speech detected. Please try again and speak clearly." });
       return;
     }
 
-    (payload as Record<string, unknown>).text = text;
+    payloadObject.text = text;
     res.setHeader("server-timing", `stt;dur=${totalMs}`);
-    res.json(payload);
+    res.json(payloadObject);
   } catch (err: unknown) {
     const message =
       err instanceof Error
         ? err.name === "TimeoutError"
           ? "STT service timed out. Try a shorter clip."
-          : err.message.includes("ECONNREFUSED")
-            ? "STT service is not running. Start it with: docker compose up stt"
+          : err.message.toLowerCase().includes("fetch failed") || err.message.includes("ECONNREFUSED")
+            ? "STT service is not running or unreachable. Start it with: docker compose up --build"
             : err.message
         : "Transcription failed.";
     res.status(502).json({ error: message });
@@ -176,7 +220,7 @@ app.post("/api/transcribe", applyRateLimit, upload.single("audio"), async (req, 
 
 // ── Error handler ───────────────────────────────────────────────────────────────
 
-app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+app.use((error: unknown, _req: Request, res: ExpressResponse, _next: NextFunction) => {
   if (error instanceof multer.MulterError) {
     if (error.code === "LIMIT_FILE_SIZE") {
       res.status(413).json({ error: "Audio file exceeds 25MB limit." });
