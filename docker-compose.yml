@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   stt:
     build: ./stt
@@ -13,6 +11,12 @@ services:
       - STT_TIMESTAMPS=${STT_TIMESTAMPS:-segments}
     volumes:
       - whisper-cache:/root/.cache
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     restart: unless-stopped
 
   web:
@@ -23,7 +27,8 @@ services:
       - STT_URL=http://stt:8000
       - PORT=8787
     depends_on:
-      - stt
+      stt:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

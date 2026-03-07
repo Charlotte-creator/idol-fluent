@@ -2,10 +2,10 @@ FROM node:20-slim
 
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --production=false
+RUN npm ci
 
 COPY . .
-RUN npm run build
+RUN npm run build && npm prune --omit=dev
 
 EXPOSE 8787
-CMD ["node", "dist-server/index.js"]
+CMD ["node", "server/dist/index.js"]
