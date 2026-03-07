@@ -28,8 +28,10 @@ import { useTranscription } from "@/hooks/useTranscription";
 import { usePauseSensitivity } from "@/hooks/usePauseSensitivity";
 import { SpeechRecognitionSettings } from "@/components/SpeechRecognitionSettings";
 import { computeTranscriptMetrics, type AnalysisResult } from "@/lib/speechMetrics";
+import { PracticeCountdown } from "@/components/PracticeCountdown";
 
 const TIME_OPTIONS = [2, 3, 4, 5];
+const COUNTDOWN_SECONDS = 3;
 
 const Retell = () => {
   const { id } = useParams<{ id: string }>();
@@ -37,15 +39,17 @@ const Retell = () => {
   const clip = id ? getClip(id) : undefined;
 
   const [timeLimit, setTimeLimit] = useState(3);
-  const [phase, setPhase] = useState<"setup" | "recording" | "analyzing" | "results">("setup");
+  const [phase, setPhase] = useState<"setup" | "countdown" | "recording" | "analyzing" | "results">("setup");
   const [remaining, setRemaining] = useState(0);
   const [warning, setWarning] = useState(false);
+  const [countdownValue, setCountdownValue] = useState(COUNTDOWN_SECONDS);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [analysisDurationSeconds, setAnalysisDurationSeconds] = useState(0);
   const { pauseSensitivity, pauseThresholdSeconds, setPauseSensitivity } = usePauseSensitivity();
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isFinalizingRef = useRef(false);
+  const countdownLaunchRef = useRef(false);
   const {
     isRecording,
     audioUrl,
@@ -67,12 +71,15 @@ const Retell = () => {
       ? shadowSessions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0]
       : null;
   }, [clip]);
-  const handleStart = useCallback(async () => {
+  const beginRecording = useCallback(async () => {
     setRemaining(timeLimit * 60);
     setWarning(false);
     setAnalysisDurationSeconds(0);
     const started = await startRecording();
-    if (!started) return;
+    if (!started) {
+      setPhase("setup");
+      return;
+    }
     isFinalizingRef.current = false;
     setAnalysisResult(null);
     setPhase("recording");
@@ -91,10 +98,41 @@ const Retell = () => {
     }, 1000);
   }, [timeLimit, startRecording, stopRecording]);
 
+  const handleStart = useCallback(() => {
+    setAnalysisResult(null);
+    setAnalysisDurationSeconds(0);
+    setWarning(false);
+    setCountdownValue(COUNTDOWN_SECONDS);
+    countdownLaunchRef.current = false;
+    setPhase("countdown");
+  }, []);
+
+  const handleCancelCountdown = useCallback(() => {
+    countdownLaunchRef.current = false;
+    setCountdownValue(COUNTDOWN_SECONDS);
+    setPhase("setup");
+  }, []);
+
   const handleStop = useCallback(() => {
     stopRecording();
     if (timerRef.current) clearInterval(timerRef.current);
   }, [stopRecording]);
+
+  useEffect(() => {
+    if (phase !== "countdown") {
+      countdownLaunchRef.current = false;
+      return;
+    }
+    if (countdownValue > 0) {
+      const timer = setTimeout(() => {
+        setCountdownValue((value) => value - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+    if (countdownLaunchRef.current) return;
+    countdownLaunchRef.current = true;
+    void beginRecording();
+  }, [beginRecording, countdownValue, phase]);
 
   // When recording stops, analyze
   useEffect(() => {
@@ -269,10 +307,36 @@ const Retell = () => {
           onPauseSensitivityChange={setPauseSensitivity}
         />
 
+        {transcriptionError && (
+          <Card className="border-destructive/30">
+            <CardHeader>
+              <CardTitle className="text-base text-destructive">Microphone Error</CardTitle>
+              <CardDescription>{transcriptionError}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button variant="outline" onClick={handleStart}>
+                Retry microphone
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         <Button size="lg" className="w-full" onClick={handleStart}>
           <Mic className="mr-1 h-4 w-4" /> Start Retelling ({timeLimit} min)
         </Button>
       </div>
+    );
+  }
+
+  if (phase === "countdown") {
+    return (
+      <PracticeCountdown
+        seconds={countdownValue}
+        title="Get ready to retell"
+        subtitle="Recording starts automatically when countdown ends."
+        cancelLabel="Cancel"
+        onCancel={handleCancelCountdown}
+      />
     );
   }
 

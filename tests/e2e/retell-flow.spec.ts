@@ -26,7 +26,10 @@ test("retell flow transcribes deterministically and saves session", async ({ pag
 
   await page.goto(`/clip/${clip.id}/retell`);
   await page.getByRole("button", { name: /Start Retelling/ }).click();
-  await expect(page.getByRole("heading", { name: "Retelling..." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Get ready to retell" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Retelling..." })).toBeVisible({
+    timeout: 10_000,
+  });
 
   await page.waitForTimeout(2200);
   await page.getByRole("button", { name: "Stop Recording" }).click();
