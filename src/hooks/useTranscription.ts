@@ -47,7 +47,7 @@ export function normalizeLanguageHint(rawLanguage: string): string {
   const cleaned = rawLanguage.trim();
   if (!cleaned) return "";
 
-  const normalized = cleaned.replaceAll("_", "-");
+  const normalized = cleaned.replace(/_/g, "-");
   return normalized.split("-", 1)[0].toLowerCase();
 }
 
