@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -18,6 +19,13 @@ WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
 MAX_CONCURRENT = int(os.getenv("STT_MAX_CONCURRENT", "2"))
 STT_TIMESTAMPS = (os.getenv("STT_TIMESTAMPS", "segments") or "segments").strip().lower()
 VALID_TIMESTAMP_MODES = {"none", "segments", "words"}
+STT_DISFLUENCY_PROMPT = (
+    os.getenv(
+        "STT_DISFLUENCY_PROMPT",
+        "Transcribe verbatim. Keep disfluencies such as um, uh, er, hmm, like, and you know.",
+    )
+    .strip()
+)
 
 WHISPER_LANGUAGE_CODES = {
     "af", "am", "ar", "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs", "ca", "cs",
@@ -31,6 +39,7 @@ WHISPER_LANGUAGE_CODES = {
 }
 
 _timestamp_mode = STT_TIMESTAMPS if STT_TIMESTAMPS in VALID_TIMESTAMP_MODES else "segments"
+FILLER_HINT_REGEX = re.compile(r"\b(um+|uh+|erm|er|ah+|hmm+|mm+|like|you know|i mean)\b", re.IGNORECASE)
 
 app = FastAPI(title="stt-service")
 _semaphore = asyncio.Semaphore(MAX_CONCURRENT)
@@ -158,6 +167,14 @@ def _serialize_words(segment: Any) -> list[dict[str, Any]] | None:
     return serialized or None
 
 
+def _count_filler_hints(text: str) -> int:
+    return len(FILLER_HINT_REGEX.findall(text))
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"\b[a-zA-Z']+\b", text))
+
+
 def _transcribe_sync(audio_path: str, language: str | None, prompt_phrases: list[str]):
     model = _get_model()
     base_kwargs: dict[str, Any] = {"beam_size": 5}
@@ -165,8 +182,13 @@ def _transcribe_sync(audio_path: str, language: str | None, prompt_phrases: list
     if language:
         base_kwargs["language"] = language
 
+    initial_prompt_parts = []
+    if STT_DISFLUENCY_PROMPT:
+        initial_prompt_parts.append(STT_DISFLUENCY_PROMPT)
     if prompt_phrases:
-        base_kwargs["initial_prompt"] = ", ".join(prompt_phrases)
+        initial_prompt_parts.append(", ".join(prompt_phrases))
+    if initial_prompt_parts:
+        base_kwargs["initial_prompt"] = " ".join(initial_prompt_parts)
 
     if _timestamp_mode == "words":
         base_kwargs["word_timestamps"] = True
@@ -216,14 +238,33 @@ def _transcribe_sync(audio_path: str, language: str | None, prompt_phrases: list
 
     # First pass uses VAD for cleaner segmentation.
     result = run_pass(vad_filter=True)
-    if str(result.get("text", "")).strip():
+    primary_text = str(result.get("text", "")).strip()
+    if primary_text:
+        primary_fillers = _count_filler_hints(primary_text)
+        primary_words = _word_count(primary_text)
+        duration_seconds = float(result.get("durationSeconds") or 0)
+        # If transcript is substantial but has zero disfluency tokens, run a second pass
+        # without VAD to recover low-energy fillers that VAD can clip.
+        if not (
+            primary_fillers == 0 and
+            primary_words >= 8 and
+            duration_seconds >= 3
+        ):
+            return result
+    else:
+        primary_fillers = 0
+
+    # Fallback pass without VAD recovers low-volume/short utterances and disfluencies.
+    fallback = run_pass(vad_filter=False)
+    fallback_text = str(fallback.get("text", "")).strip()
+    if not fallback_text:
         return result
 
-    # Fallback pass without VAD recovers low-volume/short utterances.
-    fallback = run_pass(vad_filter=False)
-    if str(fallback.get("text", "")).strip():
+    fallback_fillers = _count_filler_hints(fallback_text)
+    if not primary_text or fallback_fillers > primary_fillers:
         fallback["vadFallback"] = "disabled-vad"
-    return fallback
+        return fallback
+    return result
 
 
 @app.post("/transcribe")

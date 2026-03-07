@@ -42,12 +42,22 @@ describe("countFillerWords", () => {
   });
 
   it("counts contextual fillers at discourse boundaries", () => {
-    const result = countFillerWords("Like, I think we should go. It was, like, really hard. Right, let's start.");
+    const result = countFillerWords("Like, I think we should go. It was like really hard. Right, let's start.");
 
     expect(result.contextualCount).toBe(3);
     expect(result.details).toMatchObject({
       like: 2,
       right: 1,
+    });
+  });
+
+  it("counts additional hesitation variants", () => {
+    const result = countFillerWords("Umm, uhh, and mm-hmm.");
+    expect(result.strongCount).toBe(3);
+    expect(result.details).toMatchObject({
+      umm: 1,
+      uhh: 1,
+      "mm-hmm": 1,
     });
   });
 });

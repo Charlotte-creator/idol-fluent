@@ -1,6 +1,20 @@
 import type { TranscriptionSegment } from "@/lib/transcription";
 
-const STRONG_FILLERS = ["um", "uh", "erm", "ah", "hmm", "hm", "er", "mm"] as const;
+const STRONG_FILLERS = [
+  "um",
+  "umm",
+  "uh",
+  "uhh",
+  "erm",
+  "ah",
+  "hmm",
+  "hm",
+  "er",
+  "mm",
+  "mhm",
+  "mm-hmm",
+  "uh-huh",
+] as const;
 const CONTEXTUAL_FILLERS = new Set([
   "like",
   "so",
@@ -15,6 +29,7 @@ const MULTI_WORD_FILLERS = ["you know", "i mean", "kind of", "sort of"] as const
 const HESITATION_SOUNDS = ["hmm", "hm", "ah", "er", "oh", "mm", "uh huh"] as const;
 const REPAIR_PHRASES = ["i mean", "sorry"] as const;
 const CLAUSE_BOUNDARY_PUNCTUATION = new Set([",", ";", ":", "—", "-", "…", "..."]);
+const COPULA_WORDS = new Set(["is", "am", "are", "was", "were", "be", "been", "being", "it's", "thats"]);
 
 const DEFAULT_PAUSE_THRESHOLD_SECONDS = 0.6;
 const DEFAULT_SHORT_PAUSE_SECONDS = 0.3;
@@ -47,6 +62,55 @@ function tokenize(text: string): Token[] {
 function countMatches(text: string, regex: RegExp): number {
   const matches = text.match(regex);
   return matches ? matches.length : 0;
+}
+
+function countNonOverlappingPhraseMatches(
+  text: string,
+  phrases: readonly string[],
+): { count: number; details: Record<string, number> } {
+  type Match = { start: number; end: number; phrase: string };
+  const lower = text.toLowerCase();
+  const candidates: Match[] = [];
+
+  for (const phrase of phrases) {
+    const regex = new RegExp(`\\b${escapeRegex(phrase)}\\b`, "gi");
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(lower)) !== null) {
+      candidates.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        phrase,
+      });
+    }
+  }
+
+  candidates.sort((a, b) => {
+    if (a.start !== b.start) return a.start - b.start;
+    return (b.end - b.start) - (a.end - a.start);
+  });
+
+  const occupied = new Array<boolean>(lower.length).fill(false);
+  const details: Record<string, number> = {};
+  let count = 0;
+
+  for (const candidate of candidates) {
+    let overlaps = false;
+    for (let i = candidate.start; i < candidate.end; i++) {
+      if (occupied[i]) {
+        overlaps = true;
+        break;
+      }
+    }
+    if (overlaps) continue;
+
+    for (let i = candidate.start; i < candidate.end; i++) {
+      occupied[i] = true;
+    }
+    details[candidate.phrase] = (details[candidate.phrase] || 0) + 1;
+    count += 1;
+  }
+
+  return { count, details };
 }
 
 function percentile(values: number[], quantile: number): number {
@@ -192,23 +256,13 @@ export function countFillerWords(text: string): {
 } {
   const normalizedText = text.toLowerCase();
   const details: Record<string, number> = {};
-  let strongCount = 0;
+  const strongPhrases = [...STRONG_FILLERS, ...MULTI_WORD_FILLERS];
+  const strongMatches = countNonOverlappingPhraseMatches(normalizedText, strongPhrases);
+  let strongCount = strongMatches.count;
   let contextualCount = 0;
 
-  for (const filler of STRONG_FILLERS) {
-    const regex = new RegExp(`\\b${escapeRegex(filler)}\\b`, "gi");
-    const matchCount = countMatches(normalizedText, regex);
-    if (matchCount === 0) continue;
-    details[filler] = (details[filler] || 0) + matchCount;
-    strongCount += matchCount;
-  }
-
-  for (const filler of MULTI_WORD_FILLERS) {
-    const regex = new RegExp(`\\b${escapeRegex(filler)}\\b`, "gi");
-    const matchCount = countMatches(normalizedText, regex);
-    if (matchCount === 0) continue;
-    details[filler] = (details[filler] || 0) + matchCount;
-    strongCount += matchCount;
+  for (const [phrase, matchCount] of Object.entries(strongMatches.details)) {
+    details[phrase] = (details[phrase] || 0) + matchCount;
   }
 
   const tokens = tokenize(normalizedText);
@@ -225,9 +279,14 @@ export function countFillerWords(text: string): {
       HESITATION_SOUNDS.includes(prevToken.value as (typeof HESITATION_SOUNDS)[number]);
     const nextIsClauseBoundary =
       nextToken?.kind === "punct" && CLAUSE_BOUNDARY_PUNCTUATION.has(nextToken.value);
+    const likeCopulaPattern =
+      token.value === "like" &&
+      prevToken?.kind === "word" &&
+      COPULA_WORDS.has(prevToken.value) &&
+      nextToken?.kind === "word";
 
     // Count contextual fillers mostly when they appear as discourse markers at clause boundaries.
-    const isDiscourseMarker = prevIsBoundary || prevIsHesitation || nextIsClauseBoundary;
+    const isDiscourseMarker = prevIsBoundary || prevIsHesitation || nextIsClauseBoundary || likeCopulaPattern;
     if (!isDiscourseMarker) continue;
 
     details[token.value] = (details[token.value] || 0) + 1;
