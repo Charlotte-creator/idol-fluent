@@ -19,6 +19,24 @@ export interface Session {
   durationSeconds: number;
   totalWords: number;
   pauseRatio: number;
+  pauseMethod?: "timestamps" | "text";
+  silentPauseCount?: number;
+  silentPauseTotalSeconds?: number;
+  silentPauseRatePerMinute?: number;
+  silentPauseAvgSeconds?: number;
+  silentPauseP95Seconds?: number;
+  longestSilentPauseSeconds?: number;
+  silentPauseHistogram?: {
+    short: number;
+    medium: number;
+    long: number;
+  };
+  fillerCountStrong?: number;
+  fillerCountContextual?: number;
+  fillerRatePerMinute?: number;
+  repetitionCount?: number;
+  repairCount?: number;
+  choppinessCount?: number;
   vocabularyRichness: number;
   elongationCount: number;
   timeLimitMinutes?: number;

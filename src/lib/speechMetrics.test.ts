@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { countFillerWords, detectElongations } from "@/lib/speechMetrics";
+import {
+  computeTranscriptMetrics,
+  countFillerWords,
+  detectElongations,
+  detectRepetitions,
+} from "@/lib/speechMetrics";
 
 describe("detectElongations", () => {
   it("detects repeated words, hesitation sounds, and repeated characters", () => {
@@ -16,10 +21,12 @@ describe("detectElongations", () => {
 });
 
 describe("countFillerWords", () => {
-  it("counts explicit filler words", () => {
-    const result = countFillerWords("Um, you know, this is actually fine.");
+  it("counts strong and contextual fillers separately", () => {
+    const result = countFillerWords("Um, you know, this is, actually, fine.");
 
     expect(result.count).toBe(3);
+    expect(result.strongCount).toBe(2);
+    expect(result.contextualCount).toBe(1);
     expect(result.details).toMatchObject({
       um: 1,
       "you know": 1,
@@ -27,21 +34,58 @@ describe("countFillerWords", () => {
     });
   });
 
-  it("does not over-count lexical uses of like, so, and right", () => {
-    const result = countFillerWords("I like this song so much. Turn right at the next light.");
+  it("does not count lexical uses like 'I like pizza'", () => {
+    const result = countFillerWords("I like pizza and we walked right home. I think so.");
 
     expect(result.count).toBe(0);
     expect(result.details).toEqual({});
   });
 
-  it("counts contextual like, so, and right as discourse markers", () => {
-    const result = countFillerWords("So, we should start. It was, like, very hard. Right, let's go.");
+  it("counts contextual fillers at discourse boundaries", () => {
+    const result = countFillerWords("Like, I think we should go. It was, like, really hard. Right, let's start.");
 
-    expect(result.count).toBe(3);
+    expect(result.contextualCount).toBe(3);
     expect(result.details).toMatchObject({
-      so: 1,
-      like: 1,
+      like: 2,
       right: 1,
     });
+  });
+});
+
+describe("detectRepetitions", () => {
+  it("detects immediate repeated words", () => {
+    const result = detectRepetitions("I I think this is the the right way.");
+    expect(result.count).toBe(2);
+    expect(result.details).toMatchObject({
+      "i i": 1,
+      "the the": 1,
+    });
+  });
+});
+
+describe("computeTranscriptMetrics pause metrics", () => {
+  it("computes silent pause metrics from synthetic segment gaps", () => {
+    const metrics = computeTranscriptMetrics(
+      "hello there this is a test",
+      10,
+      [],
+      {
+        pauseThresholdSeconds: 0.6,
+        segments: [
+          { start: 0, end: 1, text: "hello there" },
+          { start: 1.8, end: 2.5, text: "this" },
+          { start: 4.0, end: 5.0, text: "is a" },
+          { start: 5.3, end: 6.0, text: "test" },
+        ],
+      },
+    );
+
+    expect(metrics.pauseMethod).toBe("timestamps");
+    expect(metrics.silentPauseCount).toBe(2); // 0.8 and 1.5
+    expect(metrics.silentPauseTotalSeconds).toBe(2.3);
+    expect(metrics.silentPauseAvgSeconds).toBe(1.15);
+    expect(metrics.longestSilentPauseSeconds).toBe(1.5);
+    expect(metrics.silentPauseRatePerMinute).toBe(12);
+    expect(metrics.choppinessCount).toBe(1); // 0.3 gap
   });
 });

@@ -1,12 +1,35 @@
 import type { TranscriptionSegment } from "@/lib/transcription";
 
-const ALWAYS_FILLERS = ["um", "uh", "you know", "basically", "actually", "literally"] as const;
-const CONTEXTUAL_FILLERS = new Set(["like", "so", "right"]);
+const STRONG_FILLERS = ["um", "uh", "erm", "ah", "hmm", "hm", "er", "mm"] as const;
+const CONTEXTUAL_FILLERS = new Set([
+  "like",
+  "so",
+  "well",
+  "right",
+  "okay",
+  "actually",
+  "basically",
+  "literally",
+]);
+const MULTI_WORD_FILLERS = ["you know", "i mean", "kind of", "sort of"] as const;
 const HESITATION_SOUNDS = ["hmm", "hm", "ah", "er", "oh", "mm", "uh huh"] as const;
+const REPAIR_PHRASES = ["i mean", "sorry"] as const;
+const CLAUSE_BOUNDARY_PUNCTUATION = new Set([",", ";", ":", "—", "-", "…", "..."]);
+
+const DEFAULT_PAUSE_THRESHOLD_SECONDS = 0.6;
+const DEFAULT_SHORT_PAUSE_SECONDS = 0.3;
+const MIN_TIMESTAMPS_PAUSE_SECONDS = 0.2;
 
 type Token = {
   kind: "word" | "punct";
   value: string;
+};
+
+type GapMetrics = {
+  pauseMethod: "timestamps" | "text";
+  allGapSeconds: number[];
+  silentPauses: number[];
+  choppyPauses: number[];
 };
 
 function escapeRegex(value: string): string {
@@ -19,6 +42,75 @@ function tokenize(text: string): Token[] {
     value,
     kind: /[.,!?;:]/.test(value) ? "punct" as const : "word" as const,
   }));
+}
+
+function countMatches(text: string, regex: RegExp): number {
+  const matches = text.match(regex);
+  return matches ? matches.length : 0;
+}
+
+function percentile(values: number[], quantile: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.max(0, Math.min(sorted.length - 1, Math.ceil(quantile * sorted.length) - 1));
+  return sorted[index];
+}
+
+function normalizeSegments(segments: TranscriptionSegment[] | undefined): TranscriptionSegment[] {
+  if (!segments || segments.length === 0) return [];
+  return segments
+    .filter((segment) => Number.isFinite(segment.start) && Number.isFinite(segment.end) && segment.end >= segment.start)
+    .sort((a, b) => a.start - b.start);
+}
+
+function collectGapsFromSegments(segments: TranscriptionSegment[]): number[] {
+  if (segments.length < 2) return [];
+
+  const gaps: number[] = [];
+  for (let i = 1; i < segments.length; i++) {
+    const gap = Math.round((segments[i].start - segments[i - 1].end) * 1000) / 1000;
+    if (gap >= MIN_TIMESTAMPS_PAUSE_SECONDS) {
+      gaps.push(gap);
+    }
+  }
+
+  return gaps;
+}
+
+function deriveGapMetrics(
+  pauseThresholdSeconds: number,
+  shortPauseThresholdSeconds: number,
+  pauseInput: PauseInput,
+): GapMetrics {
+  const normalizedSegments = normalizeSegments(pauseInput.segments);
+  if (normalizedSegments.length >= 2) {
+    const allGapSeconds = collectGapsFromSegments(normalizedSegments);
+    const silentPauses = allGapSeconds.filter((gap) => gap >= pauseThresholdSeconds);
+    const choppyPauses = allGapSeconds.filter(
+      (gap) => gap >= shortPauseThresholdSeconds && gap < pauseThresholdSeconds,
+    );
+    return {
+      pauseMethod: "timestamps",
+      allGapSeconds,
+      silentPauses,
+      choppyPauses,
+    };
+  }
+
+  const fallbackGaps = (pauseInput.silenceGapsMs || [])
+    .map((gapMs) => gapMs / 1000)
+    .filter((gap) => Number.isFinite(gap) && gap > 0);
+  const silentPauses = fallbackGaps.filter((gap) => gap >= pauseThresholdSeconds);
+  const choppyPauses = fallbackGaps.filter(
+    (gap) => gap >= shortPauseThresholdSeconds && gap < pauseThresholdSeconds,
+  );
+
+  return {
+    pauseMethod: "text",
+    allGapSeconds: fallbackGaps,
+    silentPauses,
+    choppyPauses,
+  };
 }
 
 export function detectElongations(text: string): { count: number; details: Record<string, number> } {
@@ -54,17 +146,69 @@ export function detectElongations(text: string): { count: number; details: Recor
   return { count, details };
 }
 
-export function countFillerWords(text: string): { count: number; details: Record<string, number> } {
-  const normalizedText = text.toLowerCase();
+export function detectRepetitions(text: string): { count: number; details: Record<string, number> } {
   const details: Record<string, number> = {};
   let count = 0;
 
-  for (const filler of ALWAYS_FILLERS) {
-    const regex = new RegExp(`\\b${escapeRegex(filler)}\\b`, "gi");
-    const matches = normalizedText.match(regex);
+  const repeatedWordRegex = /\b([a-z]+(?:'[a-z]+)?)\s+\1\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = repeatedWordRegex.exec(text.toLowerCase())) !== null) {
+    const label = match[0].toLowerCase();
+    details[label] = (details[label] || 0) + 1;
+    count += 1;
+  }
+
+  return { count, details };
+}
+
+export function detectRepairs(text: string): { count: number; details: Record<string, number> } {
+  const normalized = text.toLowerCase();
+  const details: Record<string, number> = {};
+  let count = 0;
+
+  for (const phrase of REPAIR_PHRASES) {
+    const regex = new RegExp(`\\b${escapeRegex(phrase)}\\b`, "gi");
+    const matches = normalized.match(regex);
     if (!matches) continue;
-    details[filler] = (details[filler] || 0) + matches.length;
+    details[phrase] = (details[phrase] || 0) + matches.length;
     count += matches.length;
+  }
+
+  const restartRegex = /\b[a-z]+(?:'[a-z]+)?\s*(?:—|-|…|\.\.\.)\s*[a-z]+(?:'[a-z]+)?\b/gi;
+  const restarts = normalized.match(restartRegex);
+  if (restarts) {
+    details.restarts = (details.restarts || 0) + restarts.length;
+    count += restarts.length;
+  }
+
+  return { count, details };
+}
+
+export function countFillerWords(text: string): {
+  count: number;
+  details: Record<string, number>;
+  strongCount: number;
+  contextualCount: number;
+} {
+  const normalizedText = text.toLowerCase();
+  const details: Record<string, number> = {};
+  let strongCount = 0;
+  let contextualCount = 0;
+
+  for (const filler of STRONG_FILLERS) {
+    const regex = new RegExp(`\\b${escapeRegex(filler)}\\b`, "gi");
+    const matchCount = countMatches(normalizedText, regex);
+    if (matchCount === 0) continue;
+    details[filler] = (details[filler] || 0) + matchCount;
+    strongCount += matchCount;
+  }
+
+  for (const filler of MULTI_WORD_FILLERS) {
+    const regex = new RegExp(`\\b${escapeRegex(filler)}\\b`, "gi");
+    const matchCount = countMatches(normalizedText, regex);
+    if (matchCount === 0) continue;
+    details[filler] = (details[filler] || 0) + matchCount;
+    strongCount += matchCount;
   }
 
   const tokens = tokenize(normalizedText);
@@ -74,25 +218,28 @@ export function countFillerWords(text: string): { count: number; details: Record
 
     const prevToken = i > 0 ? tokens[i - 1] : null;
     const nextToken = i < tokens.length - 1 ? tokens[i + 1] : null;
-    const atStart = i === 0;
 
-    const prevIsPunctuation = prevToken?.kind === "punct";
+    const prevIsBoundary = !prevToken || prevToken.kind === "punct";
     const prevIsHesitation =
       prevToken?.kind === "word" &&
       HESITATION_SOUNDS.includes(prevToken.value as (typeof HESITATION_SOUNDS)[number]);
-    const nextIsPunctuation = nextToken?.kind === "punct";
+    const nextIsClauseBoundary =
+      nextToken?.kind === "punct" && CLAUSE_BOUNDARY_PUNCTUATION.has(nextToken.value);
 
-    const isDiscourseMarker = atStart
-      ? nextIsPunctuation
-      : prevIsPunctuation || prevIsHesitation || nextIsPunctuation;
-
+    // Count contextual fillers mostly when they appear as discourse markers at clause boundaries.
+    const isDiscourseMarker = prevIsBoundary || prevIsHesitation || nextIsClauseBoundary;
     if (!isDiscourseMarker) continue;
 
     details[token.value] = (details[token.value] || 0) + 1;
-    count++;
+    contextualCount += 1;
   }
 
-  return { count, details };
+  return {
+    count: strongCount + contextualCount,
+    details,
+    strongCount,
+    contextualCount,
+  };
 }
 
 export interface TranscriptMetrics {
@@ -100,12 +247,30 @@ export interface TranscriptMetrics {
   wordsPerMinute: number;
   fillerWordCount: number;
   fillerWordsPerMinute: number;
+  fillerRatePerMinute: number;
+  fillerCountStrong: number;
+  fillerCountContextual: number;
   fillerDetails: Record<string, number>;
   expressionsUsed: string[];
   pauseRatio: number;
+  pauseMethod: "timestamps" | "text";
+  silentPauseCount: number;
+  silentPauseTotalSeconds: number;
+  silentPauseRatePerMinute: number;
+  silentPauseAvgSeconds: number;
+  silentPauseP95Seconds: number;
+  longestSilentPauseSeconds: number;
+  silentPauseHistogram: {
+    short: number;
+    medium: number;
+    long: number;
+  };
+  choppinessCount: number;
   vocabularyRichness: number;
   elongationCount: number;
   elongationDetails: Record<string, number>;
+  repetitionCount: number;
+  repairCount: number;
 }
 
 export type AnalysisResult = TranscriptMetrics & {
@@ -115,39 +280,9 @@ export type AnalysisResult = TranscriptMetrics & {
 type PauseInput = {
   silenceGapsMs?: number[];
   segments?: TranscriptionSegment[];
+  pauseThresholdSeconds?: number;
+  shortPauseThresholdSeconds?: number;
 };
-
-function calculateSilenceFromSegments(
-  durationSeconds: number,
-  segments: TranscriptionSegment[] | undefined,
-): number | null {
-  if (!segments || segments.length === 0 || durationSeconds <= 0) return null;
-
-  const MIN_PAUSE_SECONDS = 0.2;
-  const ordered = segments
-    .filter((segment) => Number.isFinite(segment.start) && Number.isFinite(segment.end) && segment.end >= segment.start)
-    .sort((a, b) => a.start - b.start);
-
-  if (ordered.length === 0) return null;
-
-  let totalSilenceMs = 0;
-  let previousEnd = 0;
-
-  for (const segment of ordered) {
-    const gapSeconds = Math.max(0, segment.start - previousEnd);
-    if (gapSeconds >= MIN_PAUSE_SECONDS) {
-      totalSilenceMs += gapSeconds * 1000;
-    }
-    previousEnd = Math.max(previousEnd, segment.end);
-  }
-
-  const trailingGapSeconds = Math.max(0, durationSeconds - previousEnd);
-  if (trailingGapSeconds >= MIN_PAUSE_SECONDS) {
-    totalSilenceMs += trailingGapSeconds * 1000;
-  }
-
-  return totalSilenceMs;
-}
 
 export function computeTranscriptMetrics(
   transcript: string,
@@ -162,35 +297,71 @@ export function computeTranscriptMetrics(
   const wordsPerMinute = durationMin > 0 ? Math.round(totalWords / durationMin) : 0;
 
   const fillers = countFillerWords(normalized);
-  const fillerWordsPerMinute =
-    durationMin > 0 ? Math.round((fillers.count / durationMin) * 10) / 10 : 0;
+  const fillerWordsPerMinute = durationMin > 0 ? Math.round((fillers.count / durationMin) * 10) / 10 : 0;
 
-  const expressionsUsed = expressions.filter((expr) =>
-    normalized.includes(expr.toLowerCase()),
-  );
+  const expressionsUsed = expressions.filter((expr) => normalized.includes(expr.toLowerCase()));
 
-  const silenceFromSegments = calculateSilenceFromSegments(durationSeconds, pauseInput.segments);
-  const totalSilence =
-    silenceFromSegments ?? (pauseInput.silenceGapsMs || []).reduce((sum, gap) => sum + gap, 0);
-  const pauseRatio =
-    durationSeconds > 0 ? Math.round((totalSilence / 1000 / durationSeconds) * 100) / 100 : 0;
+  const pauseThresholdSeconds =
+    pauseInput.pauseThresholdSeconds && pauseInput.pauseThresholdSeconds > 0
+      ? pauseInput.pauseThresholdSeconds
+      : DEFAULT_PAUSE_THRESHOLD_SECONDS;
+  const shortPauseThresholdSeconds =
+    pauseInput.shortPauseThresholdSeconds && pauseInput.shortPauseThresholdSeconds > 0
+      ? pauseInput.shortPauseThresholdSeconds
+      : DEFAULT_SHORT_PAUSE_SECONDS;
+
+  const gaps = deriveGapMetrics(pauseThresholdSeconds, shortPauseThresholdSeconds, pauseInput);
+  const totalSilenceSeconds = gaps.allGapSeconds.reduce((sum, gap) => sum + gap, 0);
+  const pauseRatio = durationSeconds > 0 ? Math.round((totalSilenceSeconds / durationSeconds) * 100) / 100 : 0;
+
+  const silentPauseCount = gaps.silentPauses.length;
+  const silentPauseTotalSeconds = Math.round(gaps.silentPauses.reduce((sum, gap) => sum + gap, 0) * 100) / 100;
+  const silentPauseAvgSeconds =
+    silentPauseCount > 0 ? Math.round((silentPauseTotalSeconds / silentPauseCount) * 100) / 100 : 0;
+  const silentPauseRatePerMinute =
+    durationMin > 0 ? Math.round((silentPauseCount / durationMin) * 10) / 10 : 0;
+  const longestSilentPauseSeconds =
+    silentPauseCount > 0 ? Math.round(Math.max(...gaps.silentPauses) * 100) / 100 : 0;
+  const silentPauseP95Seconds =
+    silentPauseCount > 0 ? Math.round(percentile(gaps.silentPauses, 0.95) * 100) / 100 : 0;
+
+  const silentPauseHistogram = {
+    short: gaps.silentPauses.filter((gap) => gap >= pauseThresholdSeconds && gap < 1).length,
+    medium: gaps.silentPauses.filter((gap) => gap >= 1 && gap < 2).length,
+    long: gaps.silentPauses.filter((gap) => gap >= 2).length,
+  };
 
   const uniqueWords = new Set(words);
-  const vocabularyRichness =
-    totalWords > 0 ? Math.round((uniqueWords.size / totalWords) * 100) / 100 : 0;
+  const vocabularyRichness = totalWords > 0 ? Math.round((uniqueWords.size / totalWords) * 100) / 100 : 0;
 
   const elongations = detectElongations(normalized);
+  const repetitions = detectRepetitions(normalized);
+  const repairs = detectRepairs(normalized);
 
   return {
     totalWords,
     wordsPerMinute,
     fillerWordCount: fillers.count,
     fillerWordsPerMinute,
+    fillerRatePerMinute: fillerWordsPerMinute,
+    fillerCountStrong: fillers.strongCount,
+    fillerCountContextual: fillers.contextualCount,
     fillerDetails: fillers.details,
     expressionsUsed,
     pauseRatio,
+    pauseMethod: gaps.pauseMethod,
+    silentPauseCount,
+    silentPauseTotalSeconds,
+    silentPauseRatePerMinute,
+    silentPauseAvgSeconds,
+    silentPauseP95Seconds,
+    longestSilentPauseSeconds,
+    silentPauseHistogram,
+    choppinessCount: gaps.choppyPauses.length,
     vocabularyRichness,
     elongationCount: elongations.count,
     elongationDetails: elongations.details,
+    repetitionCount: repetitions.count,
+    repairCount: repairs.count,
   };
 }
