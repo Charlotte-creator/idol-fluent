@@ -12,6 +12,10 @@ Current end-to-end transcription payloads include:
 Gaps found and addressed:
 - No stable `durationSeconds` field contract across STT/frontend parser.
 - No explicit timestamp mode control.
+- Filler under-counting came from a combination of:
+  - (A) model tendency to normalize to fluent text unless prompted for verbatim disfluencies,
+  - (B) VAD occasionally clipping low-energy short fillers (`eh/er/um/uh`),
+  - (C) local cleanup was audited and constrained to whitespace normalization only (no filler deletion).
 
 New behavior:
 - STT now supports `STT_TIMESTAMPS=none|segments|words` (default `segments`).
@@ -104,7 +108,7 @@ Expected:
 - User-facing error is displayed from backend message.
 - No crash, no partial session save.
 
-### Backend 5xx errors (OpenAI auth/provider)
+### Backend 5xx errors (STT service/provider)
 Expected:
 - Clear error text shown to user.
 - Existing clip/session data remains intact.

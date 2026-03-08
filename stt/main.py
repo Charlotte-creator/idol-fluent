@@ -13,18 +13,70 @@ from typing import Any
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
+from strategy import (
+    FallbackConfig,
+    PassMetrics,
+    choose_better_pass,
+    fallback_reasons,
+    should_retry_without_vad,
+)
+
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
 MAX_CONCURRENT = int(os.getenv("STT_MAX_CONCURRENT", "2"))
 STT_TIMESTAMPS = (os.getenv("STT_TIMESTAMPS", "segments") or "segments").strip().lower()
 VALID_TIMESTAMP_MODES = {"none", "segments", "words"}
+
+
+def _parse_bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_float_env(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+        if value > 0:
+            return value
+    except ValueError:
+        pass
+    return default
+
+
+def _parse_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+        if value > 0:
+            return value
+    except ValueError:
+        pass
+    return default
+
+
+STT_VERBATIM = _parse_bool_env("STT_VERBATIM", True)
+STT_FALLBACK_NO_VAD = _parse_bool_env("STT_FALLBACK_NO_VAD", True)
 STT_DISFLUENCY_PROMPT = (
     os.getenv(
         "STT_DISFLUENCY_PROMPT",
-        "Transcribe verbatim. Keep disfluencies such as um, uh, er, hmm, like, and you know.",
+        "Transcribe verbatim. Keep filler words and disfluencies (um, uh, er, eh, erm), "
+        "repetitions, and false starts. Do not rewrite into fluent text.",
     )
     .strip()
+)
+FALLBACK_CONFIG = FallbackConfig(
+    long_audio_seconds=_parse_float_env("STT_FALLBACK_LONG_AUDIO_SECONDS", 6.0),
+    min_words_long_audio=_parse_int_env("STT_FALLBACK_MIN_WORDS_LONG_AUDIO", 3),
+    zero_fillers_seconds=_parse_float_env("STT_FALLBACK_ZERO_FILLERS_SECONDS", 10.0),
+    min_speech_ratio=_parse_float_env("STT_FALLBACK_MIN_SPEECH_RATIO", 0.25),
 )
 
 WHISPER_LANGUAGE_CODES = {
@@ -39,7 +91,6 @@ WHISPER_LANGUAGE_CODES = {
 }
 
 _timestamp_mode = STT_TIMESTAMPS if STT_TIMESTAMPS in VALID_TIMESTAMP_MODES else "segments"
-FILLER_HINT_REGEX = re.compile(r"\b(um+|uh+|erm|er|ah+|hmm+|mm+|like|you know|i mean)\b", re.IGNORECASE)
 
 app = FastAPI(title="stt-service")
 _semaphore = asyncio.Semaphore(MAX_CONCURRENT)
@@ -167,12 +218,9 @@ def _serialize_words(segment: Any) -> list[dict[str, Any]] | None:
     return serialized or None
 
 
-def _count_filler_hints(text: str) -> int:
-    return len(FILLER_HINT_REGEX.findall(text))
-
-
-def _word_count(text: str) -> int:
-    return len(re.findall(r"\b[a-zA-Z']+\b", text))
+def _cleanup_transcript_text(text: str) -> str:
+    # Keep content verbatim; only normalize whitespace and trim.
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _transcribe_sync(audio_path: str, language: str | None, prompt_phrases: list[str]):
@@ -182,11 +230,13 @@ def _transcribe_sync(audio_path: str, language: str | None, prompt_phrases: list
     if language:
         base_kwargs["language"] = language
 
-    initial_prompt_parts = []
-    if STT_DISFLUENCY_PROMPT:
+    initial_prompt_parts: list[str] = []
+    if STT_VERBATIM and STT_DISFLUENCY_PROMPT:
         initial_prompt_parts.append(STT_DISFLUENCY_PROMPT)
     if prompt_phrases:
-        initial_prompt_parts.append(", ".join(prompt_phrases))
+        initial_prompt_parts.append(
+            "Focus phrases: " + ", ".join(prompt_phrases)
+        )
     if initial_prompt_parts:
         base_kwargs["initial_prompt"] = " ".join(initial_prompt_parts)
 
@@ -198,20 +248,26 @@ def _transcribe_sync(audio_path: str, language: str | None, prompt_phrases: list
         segments_iter, info = model.transcribe(audio_path, **kwargs)
         full_text_parts: list[str] = []
         segments: list[dict[str, Any]] = []
+        speech_seconds_kept = 0.0
 
         for segment in segments_iter:
-            text = segment.text.strip()
+            text = _cleanup_transcript_text(str(getattr(segment, "text", "")))
             if not text:
                 continue
 
             full_text_parts.append(text)
 
+            start = float(getattr(segment, "start", 0.0) or 0.0)
+            end = float(getattr(segment, "end", 0.0) or 0.0)
+            if end >= start:
+                speech_seconds_kept += end - start
+
             if _timestamp_mode == "none":
                 continue
 
             segment_payload: dict[str, Any] = {
-                "start": round(float(segment.start), 3),
-                "end": round(float(segment.end), 3),
+                "start": round(start, 3),
+                "end": round(end, 3),
                 "text": text,
             }
 
@@ -227,44 +283,80 @@ def _transcribe_sync(audio_path: str, language: str | None, prompt_phrases: list
             segments.append(segment_payload)
 
         duration_seconds = round(float(getattr(info, "duration", 0.0) or 0.0), 3)
+        text_output = _cleanup_transcript_text(" ".join(full_text_parts))
+        pass_metrics = PassMetrics(
+            text=text_output,
+            audio_duration_seconds=duration_seconds,
+            speech_seconds_kept=round(speech_seconds_kept, 3) if speech_seconds_kept > 0 else None,
+        )
+
         return {
-            "text": " ".join(full_text_parts).strip(),
+            "text": text_output,
             "language": getattr(info, "language", None) or language,
             "durationSeconds": duration_seconds,
             # Keep legacy field for backward compatibility.
             "duration": duration_seconds,
             "segments": segments if segments else None,
+            "speechSecondsKept": pass_metrics.speech_seconds_kept,
+            "metrics": pass_metrics,
         }
 
-    # First pass uses VAD for cleaner segmentation.
-    result = run_pass(vad_filter=True)
-    primary_text = str(result.get("text", "")).strip()
-    if primary_text:
-        primary_fillers = _count_filler_hints(primary_text)
-        primary_words = _word_count(primary_text)
-        duration_seconds = float(result.get("durationSeconds") or 0)
-        # If transcript is substantial but has zero disfluency tokens, run a second pass
-        # without VAD to recover low-energy fillers that VAD can clip.
-        if not (
-            primary_fillers == 0 and
-            primary_words >= 8 and
-            duration_seconds >= 3
-        ):
-            return result
-    else:
-        primary_fillers = 0
+    pass_a = run_pass(vad_filter=True)
+    pass_a_metrics: PassMetrics = pass_a["metrics"]
 
-    # Fallback pass without VAD recovers low-volume/short utterances and disfluencies.
-    fallback = run_pass(vad_filter=False)
-    fallback_text = str(fallback.get("text", "")).strip()
-    if not fallback_text:
-        return result
+    pass_b: dict[str, Any] | None = None
+    reasons: list[str] = []
 
-    fallback_fillers = _count_filler_hints(fallback_text)
-    if not primary_text or fallback_fillers > primary_fillers:
-        fallback["vadFallback"] = "disabled-vad"
-        return fallback
-    return result
+    if STT_FALLBACK_NO_VAD:
+        reasons = fallback_reasons(pass_a_metrics, FALLBACK_CONFIG)
+        if should_retry_without_vad(pass_a_metrics, FALLBACK_CONFIG):
+            pass_b = run_pass(vad_filter=False)
+
+    chosen_pass = "vad"
+    chosen_result = pass_a
+
+    if pass_b is not None:
+        pass_b_metrics: PassMetrics = pass_b["metrics"]
+        chosen_pass = choose_better_pass(pass_a_metrics, pass_b_metrics)
+        if chosen_pass == "no_vad":
+            chosen_result = pass_b
+
+    chosen_metrics: PassMetrics = chosen_result["metrics"]
+    diagnostics: dict[str, Any] = {
+        "vadUsed": chosen_pass == "vad",
+        "retryWithoutVad": pass_b is not None,
+        "chosenPass": chosen_pass,
+        "timestampsMode": _timestamp_mode,
+        "promptStrategy": "verbatim_disfluencies" if (STT_VERBATIM and STT_DISFLUENCY_PROMPT) else "default",
+        "audioDurationSeconds": chosen_metrics.audio_duration_seconds,
+        "speechSecondsKept": chosen_result.get("speechSecondsKept"),
+        "passA": {
+            "transcriptWordCount": pass_a_metrics.transcript_word_count,
+            "fillerCount": pass_a_metrics.filler_count,
+            "speechSecondsKept": pass_a_metrics.speech_seconds_kept,
+        },
+    }
+
+    if reasons:
+        diagnostics["fallbackReasons"] = reasons
+
+    if pass_b is not None:
+        pass_b_metrics = pass_b["metrics"]
+        diagnostics["passB"] = {
+            "transcriptWordCount": pass_b_metrics.transcript_word_count,
+            "fillerCount": pass_b_metrics.filler_count,
+            "speechSecondsKept": pass_b_metrics.speech_seconds_kept,
+        }
+
+    response = {
+        "text": chosen_result["text"],
+        "language": chosen_result["language"],
+        "durationSeconds": chosen_result["durationSeconds"],
+        "duration": chosen_result["duration"],
+        "segments": chosen_result["segments"],
+        "sttDiagnostics": diagnostics,
+    }
+    return response
 
 
 @app.post("/transcribe")

@@ -2,6 +2,7 @@
 
 Idol Fluent is a speaking-practice app for shadowing and retelling short YouTube clips.
 Audio is recorded in the browser and transcribed server-side using a self-hosted Whisper model (via [faster-whisper](https://github.com/SYSTRAN/faster-whisper)).
+The STT service runs a two-pass strategy (VAD on, then optional no-VAD fallback) to better preserve short low-energy fillers.
 
 It helps learners track:
 - words per minute
@@ -43,6 +44,12 @@ Set in `.env` or `docker-compose.yml`:
 | `WHISPER_DEVICE` | `cpu` | `cpu`, `cuda`, `auto` |
 | `WHISPER_COMPUTE_TYPE` | `int8` | `int8` (CPU), `float16` (GPU), `float32` |
 | `STT_TIMESTAMPS` | `segments` | `none`, `segments`, `words` |
+| `STT_VERBATIM` | `true` | `true`, `false` |
+| `STT_FALLBACK_NO_VAD` | `true` | `true`, `false` |
+| `STT_FALLBACK_LONG_AUDIO_SECONDS` | `6` | positive number |
+| `STT_FALLBACK_MIN_WORDS_LONG_AUDIO` | `3` | positive integer |
+| `STT_FALLBACK_ZERO_FILLERS_SECONDS` | `10` | positive number |
+| `STT_FALLBACK_MIN_SPEECH_RATIO` | `0.25` | `0`–`1` |
 
 Larger models are more accurate but slower and use more RAM/VRAM.
 
@@ -88,6 +95,7 @@ npm run lint         # run eslint
 
 Dev-only debug route:
 - Set `VITE_DEBUG=1` and open `/debug/transcribe` to upload audio, inspect raw response JSON, and compute WER/CER against a pasted reference transcript.
+- Runtime section also shows STT diagnostics (`chosenPass`, fallback trigger, prompt strategy) to verify filler-sensitive behavior.
 
 ## Browser Requirements
 
