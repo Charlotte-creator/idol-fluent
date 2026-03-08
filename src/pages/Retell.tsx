@@ -29,6 +29,7 @@ import { usePauseSensitivity } from "@/hooks/usePauseSensitivity";
 import { SpeechRecognitionSettings } from "@/components/SpeechRecognitionSettings";
 import { computeTranscriptMetrics, type AnalysisResult } from "@/lib/speechMetrics";
 import { PracticeCountdown } from "@/components/PracticeCountdown";
+import type { SttDiagnostics } from "@/lib/transcription";
 
 const TIME_OPTIONS = [2, 3, 4, 5];
 const COUNTDOWN_SECONDS = 3;
@@ -45,6 +46,7 @@ const Retell = () => {
   const [countdownValue, setCountdownValue] = useState(COUNTDOWN_SECONDS);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [analysisDurationSeconds, setAnalysisDurationSeconds] = useState(0);
+  const [analysisDiagnostics, setAnalysisDiagnostics] = useState<SttDiagnostics | undefined>(undefined);
   const { pauseSensitivity, pauseThresholdSeconds, setPauseSensitivity } = usePauseSensitivity();
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -75,6 +77,7 @@ const Retell = () => {
     setRemaining(timeLimit * 60);
     setWarning(false);
     setAnalysisDurationSeconds(0);
+    setAnalysisDiagnostics(undefined);
     const started = await startRecording();
     if (!started) {
       setPhase("setup");
@@ -101,6 +104,7 @@ const Retell = () => {
   const handleStart = useCallback(() => {
     setAnalysisResult(null);
     setAnalysisDurationSeconds(0);
+    setAnalysisDiagnostics(undefined);
     setWarning(false);
     setCountdownValue(COUNTDOWN_SECONDS);
     countdownLaunchRef.current = false;
@@ -164,8 +168,10 @@ const Retell = () => {
           ...metrics,
         });
         setAnalysisDurationSeconds(effectiveDuration);
+        setAnalysisDiagnostics(transcription.sttDiagnostics);
       } else {
         setAnalysisDurationSeconds(durationHint ?? 0);
+        setAnalysisDiagnostics(undefined);
       }
 
       setPhase("results");
@@ -210,6 +216,7 @@ const Retell = () => {
       repairCount: analysisResult.repairCount,
       timeLimitMinutes: timeLimit,
       transcript: analysisResult.transcript,
+      sttDiagnostics: analysisDiagnostics,
     });
     navigate("/dashboard");
   };

@@ -289,6 +289,7 @@ const Shadow = () => {
           repetitionCount: metrics.repetitionCount,
           repairCount: metrics.repairCount,
           transcript: transcription.text,
+          sttDiagnostics: transcription.sttDiagnostics,
         });
       })();
     }

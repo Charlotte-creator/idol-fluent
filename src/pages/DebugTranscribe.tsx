@@ -147,6 +147,16 @@ const DebugTranscribe = () => {
             {file && <p>Request size: {formatBytes(file.size)}</p>}
             {responseJson?.duration != null && <p>Audio duration: {responseJson.duration}s</p>}
             {serverTiming && <p>Server-Timing: {serverTiming}</p>}
+            {responseJson?.sttDiagnostics && (
+              <>
+                <p>Chosen pass: {responseJson.sttDiagnostics.chosenPass}</p>
+                <p>Fallback retried: {responseJson.sttDiagnostics.retryWithoutVad ? "yes" : "no"}</p>
+                <p>Prompt strategy: {responseJson.sttDiagnostics.promptStrategy ?? "default"}</p>
+                {responseJson.sttDiagnostics.fallbackReasons?.length ? (
+                  <p>Fallback reasons: {responseJson.sttDiagnostics.fallbackReasons.join(", ")}</p>
+                ) : null}
+              </>
+            )}
           </CardContent>
         </Card>
       )}

@@ -53,4 +53,35 @@ describe("parseTranscriptionResponse", () => {
     expect(parseTranscriptionResponse(null)).toEqual({ text: "" });
     expect(parseTranscriptionResponse("abc")).toEqual({ text: "" });
   });
+
+  it("parses optional sttDiagnostics safely", () => {
+    const parsed = parseTranscriptionResponse({
+      text: "um i think this works",
+      sttDiagnostics: {
+        vadUsed: false,
+        retryWithoutVad: true,
+        chosenPass: "no_vad",
+        timestampsMode: "segments",
+        promptStrategy: "verbatim_disfluencies",
+        audioDurationSeconds: 12.3,
+        speechSecondsKept: 8.1,
+        fallbackReasons: ["long_audio_zero_fillers"],
+        passA: { transcriptWordCount: 4, fillerCount: 0, speechSecondsKept: 2.1 },
+        passB: { transcriptWordCount: 6, fillerCount: 1, speechSecondsKept: 7.9 },
+      },
+    });
+
+    expect(parsed.sttDiagnostics).toEqual({
+      vadUsed: false,
+      retryWithoutVad: true,
+      chosenPass: "no_vad",
+      timestampsMode: "segments",
+      promptStrategy: "verbatim_disfluencies",
+      audioDurationSeconds: 12.3,
+      speechSecondsKept: 8.1,
+      fallbackReasons: ["long_audio_zero_fillers"],
+      passA: { transcriptWordCount: 4, fillerCount: 0, speechSecondsKept: 2.1 },
+      passB: { transcriptWordCount: 6, fillerCount: 1, speechSecondsKept: 7.9 },
+    });
+  });
 });

@@ -21,6 +21,7 @@ export interface TranscriptionDebugInfo {
   latencyMs: number;
   confidence?: number;
   segmentCount: number;
+  sttDiagnostics?: TranscriptionResponse["sttDiagnostics"];
 }
 
 type PendingBlobRequest = {
@@ -231,7 +232,12 @@ export function useTranscription() {
           latencyMs: Math.round(performance.now() - startedAt),
           confidence: parsed.confidence,
           segmentCount: parsed.segments?.length ?? 0,
+          sttDiagnostics: parsed.sttDiagnostics,
         });
+        if (import.meta.env.DEV && parsed.sttDiagnostics) {
+          // Diagnostic breadcrumb for STT fallback behavior in development.
+          console.info("STT diagnostics", parsed.sttDiagnostics);
+        }
         return parsed;
       } catch (requestError) {
         const message = getTranscriptionRequestErrorMessage(requestError);

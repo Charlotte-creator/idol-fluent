@@ -3,13 +3,18 @@ import type { TranscriptionSegment } from "@/lib/transcription";
 const STRONG_FILLERS = [
   "um",
   "umm",
+  "ummm",
   "uh",
   "uhh",
+  "uhhh",
   "erm",
   "ah",
   "hmm",
   "hm",
   "er",
+  "err",
+  "eh",
+  "ehm",
   "mm",
   "mhm",
   "mm-hmm",
@@ -258,7 +263,7 @@ export function countFillerWords(text: string): {
   const details: Record<string, number> = {};
   const strongPhrases = [...STRONG_FILLERS, ...MULTI_WORD_FILLERS];
   const strongMatches = countNonOverlappingPhraseMatches(normalizedText, strongPhrases);
-  let strongCount = strongMatches.count;
+  const strongCount = strongMatches.count;
   let contextualCount = 0;
 
   for (const [phrase, matchCount] of Object.entries(strongMatches.details)) {

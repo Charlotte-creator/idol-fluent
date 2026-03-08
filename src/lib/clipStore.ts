@@ -1,3 +1,5 @@
+import type { SttDiagnostics } from "@/lib/transcription";
+
 export interface Clip {
   id: string;
   videoId: string;
@@ -41,6 +43,7 @@ export interface Session {
   elongationCount: number;
   timeLimitMinutes?: number;
   transcript?: string;
+  sttDiagnostics?: SttDiagnostics;
 }
 
 const CLIPS_KEY = "shadowspeak_clips";

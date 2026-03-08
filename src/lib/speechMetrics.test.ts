@@ -52,13 +52,24 @@ describe("countFillerWords", () => {
   });
 
   it("counts additional hesitation variants", () => {
-    const result = countFillerWords("Umm, uhh, and mm-hmm.");
-    expect(result.strongCount).toBe(3);
+    const result = countFillerWords("Eh, er, erm, ehm, ummm, uhh, err, and mm-hmm.");
+    expect(result.strongCount).toBe(8);
     expect(result.details).toMatchObject({
-      umm: 1,
+      eh: 1,
+      er: 1,
+      erm: 1,
+      ehm: 1,
+      ummm: 1,
       uhh: 1,
+      err: 1,
       "mm-hmm": 1,
     });
+  });
+
+  it("does not overcount partial matches inside words", () => {
+    const result = countFillerWords("Her energy and thermal errors are high.");
+    expect(result.count).toBe(0);
+    expect(result.details).toEqual({});
   });
 });
 
